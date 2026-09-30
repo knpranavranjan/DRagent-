@@ -390,6 +390,16 @@ class Handler(SimpleHTTPRequestHandler):
     store: Store = None
     app_dir: Path = None
 
+    # ACCESS KEY. None => no authentication, which is correct for the local
+    # kiosk this was built as: the only client is the browser on the same
+    # machine. It is NOT correct the moment the server is reachable from
+    # anywhere else, and run.py refuses to open a tunnel without setting it.
+    #
+    # This is a shared secret, not user accounts. It gates access to the
+    # instance; it does not identify who is using it. Anyone holding the key
+    # has full access, so treat the link as the credential.
+    auth_token: str = None
+
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(self.app_dir), **kw)
 
@@ -412,10 +422,111 @@ class Handler(SimpleHTTPRequestHandler):
             raise ValueError("body too large")
         return json.loads(self.rfile.read(n).decode("utf-8"))
 
+    # --- access control ---------------------------------------------------
+
+    def _authorised(self) -> bool:
+        """True when this request may proceed.
+
+        Three ways to present the key, in the order they are checked:
+
+          cookie          set on the first visit, so the key is not in every
+                          later URL and not in the browser history of each page
+          ?k=<key>        the first visit, and the form the shared link takes
+          X-Ophira-Key    scripted clients, which have no cookie jar
+
+        compare_digest, not ==, because a plain comparison returns faster on
+        an early mismatch and leaks the key one character at a time to anyone
+        willing to measure. The key is short-lived but the attack is cheap.
+        """
+        want = self.auth_token
+        if not want:
+            return True
+
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == "ophira_key" and secrets.compare_digest(value, want):
+                return True
+
+        given = (parse_qs(urlparse(self.path).query).get("k") or [""])[0]
+        if given and secrets.compare_digest(given, want):
+            self._issue_cookie = True
+            return True
+
+        header = self.headers.get("X-Ophira-Key") or ""
+        return bool(header) and secrets.compare_digest(header, want)
+
+    def _header_queued(self, name: str) -> bool:
+        """Has this header already been put in the outgoing buffer?"""
+        pre = (name.lower() + ":").encode("latin-1")
+        return any(bytes(h).lower().startswith(pre)
+                   for h in getattr(self, "_headers_buffer", []))
+
+    def _deny(self):
+        """401 with a page a human can read.
+
+        Deliberately says nothing about the system behind it -- not the
+        schema version, not the session count, not that this is a medical
+        tool. An unauthenticated caller learns only that a key is needed.
+        """
+        body = (b"<!doctype html><meta charset=utf-8>"
+                b"<title>Access key required</title>"
+                b"<style>body{font:16px/1.6 system-ui,sans-serif;max-width:32rem;"
+                b"margin:20vh auto;padding:0 1.5rem;color:#1a1a1a}"
+                b"code{background:#f0f0f0;padding:.15em .4em;border-radius:3px}"
+                b"@media(prefers-color-scheme:dark){body{background:#111;color:#eee}"
+                b"code{background:#222}}</style>"
+                b"<h1>Access key required</h1>"
+                b"<p>Open this service using the full link you were given, "
+                b"including the <code>?k=</code> part.</p>")
+        self.send_response(401)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
     def end_headers(self):
         # Local kiosk app: lock it down rather than leaving defaults open.
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        # CACHING. _json() already sets no-store on API replies, so only
+        # speak when nothing has been queued -- a duplicated Cache-Control
+        # is read inconsistently by intermediaries.
+        #
+        # The static app files got NO Cache-Control at all, only
+        # Last-Modified. That is not neutral: with no directive a browser
+        # applies HEURISTIC caching, guessing a freshness lifetime from the
+        # file's age, and it may serve its copy for hours without asking.
+        # The symptom was a header that had gained a link days earlier and
+        # an operator who could not see it, on a page the server was
+        # serving correctly the whole time -- unfixable from the server
+        # side and invisible from the client side.
+        #
+        # no-cache, not no-store: the copy is still kept, it just has to be
+        # revalidated. Unchanged files come back 304 with no body, so this
+        # costs one conditional request per file, not a re-download.
+        if not self._header_queued("Cache-Control"):
+            self.send_header(
+                "Cache-Control",
+                "no-store, private" if self.auth_token else "no-cache")
+        if getattr(self, "_issue_cookie", False):
+            self._issue_cookie = False
+            # HttpOnly: script cannot read it, so an XSS in the app cannot
+            # exfiltrate the key.
+            #
+            # Secure only when the request actually arrived over HTTPS, which
+            # through the tunnel it does -- cloudflared terminates TLS and
+            # says so in X-Forwarded-Proto. Setting it unconditionally looks
+            # stricter and is worse: a Secure cookie is never sent back over
+            # plain http, so a direct http:// client authenticates once and
+            # is then locked out of every subsequent request.
+            fwd = (self.headers.get("X-Forwarded-Proto") or "").lower()
+            secure = "; Secure" if fwd == "https" else ""
+            self.send_header(
+                "Set-Cookie",
+                "ophira_key=%s; Path=/; Max-Age=43200; HttpOnly; "
+                "SameSite=Lax%s" % (self.auth_token, secure))
         super().end_headers()
 
     def log_message(self, fmt, *args):
@@ -424,6 +535,8 @@ class Handler(SimpleHTTPRequestHandler):
     # --- routes -----------------------------------------------------------
 
     def do_GET(self):
+        if not self._authorised():
+            return self._deny()
         path = urlparse(self.path).path
 
         if path == "/api/health":
@@ -576,6 +689,8 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
+        if not self._authorised():
+            return self._deny()
         path = urlparse(self.path).path
         try:
             ctx = self._body()
@@ -756,6 +871,8 @@ class Handler(SimpleHTTPRequestHandler):
         return self._json(404, {"error": "no such endpoint"})
 
     def do_PUT(self):
+        if not self._authorised():
+            return self._deny()
         path = urlparse(self.path).path
         if not path.startswith("/api/sessions/"):
             return self._json(404, {"error": "no such endpoint"})
@@ -787,10 +904,15 @@ def main():
                     help="use 0.0.0.0 to allow other devices on the local network")
     ap.add_argument("--data", default=str(project_root / "data" / "sessions"))
     ap.add_argument("--app", default=str(here.parents[1]))
+    ap.add_argument("--auth-token", default=os.environ.get("OPHIRA_KEY") or None,
+                    help="require this key on every request. Set it whenever "
+                         "the server is reachable from anywhere but this "
+                         "machine. Also read from OPHIRA_KEY.")
     args = ap.parse_args()
 
     Handler.store = Store(Path(args.data).resolve())
     Handler.app_dir = Path(args.app).resolve()
+    Handler.auth_token = args.auth_token or None
 
     if not (Handler.app_dir / "index.html").is_file():
         sys.exit(f"ERROR: no index.html in {Handler.app_dir}")
@@ -806,6 +928,7 @@ def main():
     print(f"  app dir   {Handler.app_dir}")
     print(f"  sessions  {Handler.store.root}")
     print(f"  schema    {SCHEMA_VERSION}")
+    print(f"  access    {'KEY REQUIRED' if Handler.auth_token else 'open (local only)'}")
     print(line)
     print("  Ctrl-C to stop\n")
 

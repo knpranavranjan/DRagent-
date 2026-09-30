@@ -7,6 +7,7 @@
     python run.py --no-worker  frontend only (no grading; captures stay pending)
     python run.py --port 8080  use a different port
     python run.py --no-browser don't open a browser
+    python run.py --tunnel     expose it on a public HTTPS URL (key-gated)
 
 WHY A LAUNCHER AND NOT "JUST RUN THE SERVER"
 
@@ -29,6 +30,8 @@ import argparse
 import glob
 import os
 import platform
+import re
+import secrets
 import shutil
 import signal
 import socket
@@ -189,13 +192,73 @@ def find_matlab() -> str | None:
     return sorted(hits)[-1] if hits else None
 
 
+def find_cloudflared() -> str | None:
+    """cloudflared on PATH, in tools/, or in the usual winget install spot."""
+    exe = shutil.which("cloudflared")
+    if exe:
+        return exe
+    local = ROOT / "tools" / ("cloudflared.exe" if platform.system() == "Windows"
+                              else "cloudflared")
+    if local.is_file():
+        return str(local)
+    hits = glob.glob(os.path.expandvars(
+        r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\Cloudflare.cloudflared*"
+        r"\cloudflared.exe"))
+    return sorted(hits)[-1] if hits else None
+
+
+TRYCF = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+
+
+def start_tunnel(port: int, log: Path, job) -> tuple[subprocess.Popen, str] | None:
+    """Open a Cloudflare quick tunnel to the local server.
+
+    WHY A TUNNEL AND NOT PORT FORWARDING
+
+    Forwarding a port puts this machine's IP on the public internet and
+    needs a router change that outlives the demo. A tunnel is an OUTBOUND
+    connection: nothing is opened on the network, it survives the address
+    changing, and it stops existing when this process does.
+
+    The URL is issued fresh each run and is not reserved. That is the cost
+    of needing no account and no domain -- see DEPLOY_REMOTE.md for the
+    named-tunnel upgrade if a stable address is wanted.
+    """
+    exe = find_cloudflared()
+    if not exe:
+        return None
+    lf = open(log, "w", encoding="utf-8")
+    proc = subprocess.Popen(
+        [exe, "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{port}"],
+        stdout=lf, stderr=subprocess.STDOUT)
+    adopt(job, proc)
+
+    # cloudflared prints the assigned hostname a second or two in, inside a
+    # banner. Poll the log rather than the pipe: the pipe is already going
+    # to a file so the whole run stays diagnosable after the fact.
+    t0 = time.time()
+    while time.time() - t0 < 45:
+        if proc.poll() is not None:
+            return None
+        try:
+            m = TRYCF.search(log.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            m = None
+        if m:
+            return proc, m.group(0)
+        time.sleep(0.4)
+    proc.terminate()
+    return None
+
+
 def port_free(host: str, port: int) -> bool:
     with socket.socket() as s:
         s.settimeout(0.6)
         return s.connect_ex((host, port)) != 0
 
 
-def preflight(port: int, host: str, want_worker: bool, needs_port: bool = True):
+def preflight(port: int, host: str, want_worker: bool, needs_port: bool = True,
+              want_tunnel: bool = False):
     """Returns (can_serve, matlab_path). Prints a verdict for every check."""
     print(f"\n{B}Requirements{OFF}")
     print("  " + "-" * 60)
@@ -265,6 +328,17 @@ def preflight(port: int, host: str, want_worker: bool, needs_port: bool = True):
                 "train it with the matching scripts/run_*.m, or restore artifacts/models")
         fatal.append("models")
 
+    # --- tunnel ----------------------------------------------------------
+    if want_tunnel:
+        cf = find_cloudflared()
+        if cf:
+            ok("cloudflared found", cf)
+        else:
+            bad("cloudflared not installed — cannot open a tunnel",
+                "winget install --id Cloudflare.cloudflared    "
+                "(or drop cloudflared.exe in tools/)")
+            fatal.append("cloudflared")
+
     print("  " + "-" * 60)
     return (not fatal), (matlab if want_worker else None)
 
@@ -281,16 +355,31 @@ def sample_image() -> str | None:
     if not d.is_dir():
         return None
     for f in sorted(d.iterdir()):
+        # demo_* are degraded branch-demonstration inputs and one of them is
+        # rejected by the gate on purpose. Offering one as "try this" hands
+        # the operator an image that cannot pass, labelled as one that does.
+        if f.name.startswith("demo_"):
+            continue
         if f.suffix.lower() in {".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
             return str(f)
     return None
 
 
-def wait_for_http(url: str, timeout: float) -> bool:
+def wait_for_http(url: str, timeout: float, key: str | None = None) -> bool:
+    """Poll until the server answers.
+
+    The key has to be sent. With authentication on, an unkeyed probe gets a
+    valid 401 from a perfectly healthy server -- urlopen raises on that, so
+    the launcher would report "server did not come up" about a server that
+    had come up, every single tunnel run.
+    """
+    req = urllib.request.Request(url)
+    if key:
+        req.add_header("X-Ophira-Key", key)
     t0 = time.time()
     while time.time() - t0 < timeout:
         try:
-            with urllib.request.urlopen(url, timeout=1):
+            with urllib.request.urlopen(req, timeout=1):
                 return True
         except (urllib.error.URLError, OSError):
             time.sleep(0.3)
@@ -321,7 +410,18 @@ def main() -> int:
                     help="check requirements and exit")
     ap.add_argument("--verify", action="store_true",
                     help="run the full test suite and exit")
+    ap.add_argument("--tunnel", action="store_true",
+                    help="publish a public HTTPS URL via Cloudflare. Always "
+                         "key-gated; there is no unauthenticated tunnel.")
+    ap.add_argument("--key", default=os.environ.get("OPHIRA_KEY") or None,
+                    help="access key to use instead of a fresh random one, so "
+                         "the link stays valid across restarts")
     a = ap.parse_args()
+
+    # A key is generated for --tunnel and cannot be turned off. Exposing a
+    # screening tool that accepts fundus images to the open internet, with
+    # no gate, is not a mode this launcher offers.
+    key = (a.key or secrets.token_urlsafe(24)) if a.tunnel else a.key
 
     print(f"\n{B}OPHIRA{OFF}  diabetic retinopathy screening")
     print(f"{DIM}  {ROOT}{OFF}")
@@ -330,7 +430,8 @@ def main() -> int:
     # to it. Blocking verification because the app happens to be
     # running was a launcher bug, not a real requirement.
     can_serve, matlab = preflight(a.port, a.host, not a.no_worker,
-                                  needs_port=not a.verify)
+                                  needs_port=not a.verify,
+                                  want_tunnel=a.tunnel)
 
     if a.check:
         print(f"\n{'ready to start' if can_serve else 'NOT ready — see FAIL lines above'}\n")
@@ -368,15 +469,22 @@ def main() -> int:
 
     # --- server ----------------------------------------------------------
     sf = open(srv_log, "w", encoding="utf-8")
+    cmd = [sys.executable, str(ROOT / "app" / "server" / "ophira_server.py"),
+           "--port", str(a.port), "--host", a.host]
+    if key:
+        # Through the environment, not argv. Command lines are readable by
+        # any user on the box via the process list; the environment of
+        # another user's process is not.
+        cmd_env = {**os.environ, "OPHIRA_KEY": key}
+    else:
+        cmd_env = None
     p = subprocess.Popen(
-        [sys.executable, str(ROOT / "app" / "server" / "ophira_server.py"),
-         "--port", str(a.port), "--host", a.host],
-        cwd=str(ROOT), stdout=sf, stderr=subprocess.STDOUT)
+        cmd, cwd=str(ROOT), stdout=sf, stderr=subprocess.STDOUT, env=cmd_env)
     adopt(job, p)
     children.append(("server", p))
 
     url = f"http://{a.host}:{a.port}"
-    if wait_for_http(f"{url}/api/health", 20):
+    if wait_for_http(f"{url}/api/health", 20, key):
         ok("encounter server", url)
     else:
         bad("server did not come up", f"see {srv_log}")
@@ -402,9 +510,35 @@ def main() -> int:
     else:
         warn("no worker", "captures will not be graded")
 
+    # --- tunnel ----------------------------------------------------------
+    public = None
+    if a.tunnel:
+        cf_log = logs / "tunnel.log"
+        print(f"  {DIM}...   opening Cloudflare tunnel{OFF}", flush=True)
+        got = start_tunnel(a.port, cf_log, job)
+        if got:
+            tproc, public = got
+            children.append(("tunnel", tproc))
+            ok("public tunnel", public)
+        else:
+            warn("tunnel did not open — the system is running locally only",
+                 f"see {cf_log}")
+
     print("  " + "-" * 60)
-    print(f"\n{G}Open:{OFF}  {url}")
-    print(f"{DIM}  dashboard   {url}/dashboard.html{OFF}")
+
+    if public:
+        link = f"{public}/?k={key}"
+        print(f"\n{G}Public link:{OFF}  {link}")
+        print(f"{DIM}  agent UI    {public}/agent.html?k={key}{OFF}")
+        print(f"{DIM}  Anyone with this link has full access. It is the "
+              f"credential.{OFF}")
+        print(f"{DIM}  The address changes every restart unless you pass "
+              f"--key.{OFF}")
+        print(f"{DIM}  Closing this window closes the tunnel.{OFF}")
+
+    print(f"\n{G}Open:{OFF}  {url}" + (f"/?k={key}" if key else ""))
+    print(f"{DIM}  dashboard   {url}/dashboard.html"
+          f"{f'?k={key}' if key else ''}{OFF}")
     print(f"{DIM}  logs        {srv_log.parent}{OFF}")
     if matlab:
         # Looked up in the manifest rather than hardcoded: the dataset lives
@@ -417,7 +551,7 @@ def main() -> int:
     print(f"\n{DIM}Ctrl-C to stop both processes.{OFF}\n")
 
     if not a.no_browser:
-        webbrowser.open(url)
+        webbrowser.open(f"{url}/?k={key}" if key else url)
 
     # --- run until interrupted -------------------------------------------
     try:

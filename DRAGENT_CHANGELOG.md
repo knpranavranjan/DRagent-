@@ -212,3 +212,71 @@ operating points.
 
 **No agentic AI layer was added.** No LLM, framework, API client or planner.
 This is the stable baseline only.
+
+---
+
+## Remote deployment: access key + tunnel
+
+**Files** `app/server/ophira_server.py`, `run.py`, `DEPLOY_REMOTE.md` (new),
+`tests/test_remote_access.py` (new), `tests/frontend/test_deploy_e2e.py`
+
+**The problem.** The system was to be reached from outside the room it runs
+in. It cannot be hosted anywhere else -- every model is MATLAB loading a
+`.mat` file, and the job queue is a directory that two processes share, so
+no serverless platform can run it. The answer is a tunnel back to the PC.
+
+That exposed something the local design never had to care about: **the
+server had no authentication.** It was a kiosk whose only client was the
+browser on the same machine, which is a sound assumption right up until the
+moment the thing is on the internet. Published as it stood, anyone who
+found the hostname could upload fundus images, list every stored session
+and download the reports.
+
+**What was added.**
+
+An optional access key, checked on every request -- the UI and the sample
+images too, not only `/api/*`. Presented as `?k=` on the first visit, then
+carried in an `HttpOnly` cookie so it is not in the URL of every later
+page. Compared with `secrets.compare_digest`, because a plain `==` returns
+early on the first wrong character and leaks the key to anyone willing to
+time the responses. A rejected request gets a bare 401 that reveals
+nothing about what is behind it.
+
+`run.py --tunnel` starts cloudflared alongside the server and worker, in
+the same job object, so the public URL cannot outlive the process that
+opened it. **It generates a key and there is no flag to turn that off** --
+an unauthenticated tunnel to a tool that accepts patient images is not a
+mode this launcher offers.
+
+**Default behaviour is unchanged.** With no key configured the server
+behaves exactly as before, which is what the on-site kiosk and every other
+test still use. `tests/test_remote_access.py` asserts both halves: that the
+gate holds when a key is set, and that nothing changed when it is not.
+
+**Three defects this surfaced.**
+
+1. The cookie was `Secure` unconditionally. A `Secure` cookie is never
+   returned over plain http, so a local client authenticated once and was
+   then locked out of every following request. Now conditional on
+   `X-Forwarded-Proto: https`, which cloudflared sets and loopback does not.
+2. `run.py` offered `samples/demo_poor_quality.png` as the smoke-test image,
+   labelled "(passes the quality gate -> REFERRAL)". It is the deliberately
+   degraded file the gate *rejects*. Every other sample-picking helper had
+   been fixed for the `demo_*` convention; the launcher was missed.
+3. The launcher's health probe sent no key, so a healthy keyed server
+   answered 401 and the launcher reported "server did not come up".
+
+**Verified against the live tunnel**, not just locally: the full deployment
+E2E was re-run with `OPHIRA_BASE` pointing at the public hostname. Session
+created, 4 MB image uploaded, MATLAB graded it in 14.1 s across 6 stages,
+REFERRAL on `dme:referable`, both documents and the zip bundle served --
+22 checks, 0 failures. `test_deploy_e2e.py` now takes `OPHIRA_BASE` and
+`OPHIRA_KEY` so a remote deployment can be checked the same way, rather
+than assuming that working on loopback means working through a proxy that
+terminates TLS and rewrites headers.
+
+**What this does not do.** It is a shared secret, not user accounts: anyone
+with the link has full access and the link is the credential. Images travel
+to a PC whose disk is unencrypted and, in this checkout, inside a OneDrive
+folder. `DEPLOY_REMOTE.md` states this plainly and points at Cloudflare
+Access for real per-user login, or Tailscale if no public URL is wanted.

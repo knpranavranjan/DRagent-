@@ -26,7 +26,19 @@ import time
 import urllib.error
 import urllib.request
 
-B = "http://127.0.0.1:8000/api"
+# Defaults to the local kiosk. Point it at a tunnel to verify that a REMOTE
+# deployment really grades images, rather than assuming that because it
+# works on the machine it is running on, it works through the tunnel:
+#
+#   OPHIRA_BASE=https://xyz.trycloudflare.com OPHIRA_KEY=<key> #       python tests/frontend/test_deploy_e2e.py
+#
+# The difference is not cosmetic. A tunnel adds TLS termination, a proxy
+# that rewrites headers, and a request timeout -- and the image upload is
+# a multi-megabyte base64 POST, which is exactly the shape of request an
+# intermediary is most likely to cut off.
+ORIGIN = os.environ.get("OPHIRA_BASE", "http://127.0.0.1:8000").rstrip("/")
+KEY = os.environ.get("OPHIRA_KEY", "")
+B = ORIGIN + "/api"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 fails = 0
@@ -41,10 +53,12 @@ def check(name, cond, extra=""):
 
 def call(method, path, payload=None, raw=False):
     data = json.dumps(payload).encode() if payload is not None else None
-    r = urllib.request.Request(B + path, data=data, method=method,
-                               headers={"Content-Type": "application/json"})
+    hdrs = {"Content-Type": "application/json"}
+    if KEY:
+        hdrs["X-Ophira-Key"] = KEY
+    r = urllib.request.Request(B + path, data=data, method=method, headers=hdrs)
     try:
-        with urllib.request.urlopen(r, timeout=30) as resp:
+        with urllib.request.urlopen(r, timeout=120 if KEY else 30) as resp:
             body = resp.read()
             return (resp.status, body, dict(resp.headers)) if raw else \
                    (resp.status, json.loads(body or b"null"))
@@ -100,6 +114,7 @@ def ctx(pid="P-DEPLOY-01"):
 
 print("=== DRagent deployment end-to-end ===")
 print(f"  root: {ROOT}")
+print(f"  host: {ORIGIN}" + ("  (keyed)" if KEY else "  (no key)"))
 
 s, h = call("GET", "/health")
 if s != 200:
