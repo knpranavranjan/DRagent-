@@ -49,3 +49,6 @@ tools/
 
 # The saved access key. A credential, not configuration.
 .ophira_key
+
+# Written at runtime, holds a live access link. Deleted on shutdown.
+SHARE LINK.txt

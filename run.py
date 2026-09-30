@@ -231,6 +231,47 @@ def persistent_key() -> str:
     return fresh
 
 
+LINK_FILE = ROOT / "SHARE LINK.txt"
+
+
+def write_link_file(public: str, key: str, port: int) -> Path | None:
+    """Put the live link somewhere that is not terminal scrollback.
+
+    The link existed only in the launcher's output, which meant finding it
+    again was "scroll up in the black window" -- and if that window was
+    closed, minimised behind others, or the link had scrolled past, the
+    only way to get it back was to restart everything and issue a new one.
+
+    Written fresh on every run and deleted on shutdown, because a file
+    holding a dead link is worse than no file: it is the one someone
+    copies and sends.
+    """
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    body = (
+        "OPHIRA - live share link\n"
+        f"issued {stamp}  (valid only while the launcher window is open)\n"
+        + ("=" * 58) + "\n\n"
+        "Open this on any phone, tablet or laptop:\n\n"
+        f"  {public}/?k={key}\n\n"
+        "Agent view:\n\n"
+        f"  {public}/agent.html?k={key}\n\n"
+        "On this PC:\n\n"
+        f"  http://127.0.0.1:{port}/?k={key}\n\n"
+        + ("=" * 58) + "\n"
+        "Copy the WHOLE line including the ?k= part -- that is the key,\n"
+        "and without it the page answers 'Access key required'.\n\n"
+        "Anyone holding this link has full access, so send it privately.\n\n"
+        "This link dies when the launcher window closes, and the hostname\n"
+        "is different every run. This file is deleted on shutdown so that\n"
+        "a dead link is never left lying around to be copied.\n"
+    )
+    try:
+        LINK_FILE.write_text(body, encoding="utf-8")
+        return LINK_FILE
+    except OSError:
+        return None  # never worth failing a working deployment over
+
+
 def find_cloudflared() -> str | None:
     """cloudflared on PATH, in tools/, or in the usual winget install spot."""
     exe = shutil.which("cloudflared")
@@ -498,6 +539,15 @@ def main() -> int:
 
     job = kill_on_exit_job()
 
+    # A link file from a previous run holds a link that no longer works.
+    # Shutdown removes it, but only on the Ctrl-C path -- killed from Task
+    # Manager or lost to a power cut, it survives. Clear it now so a stale
+    # one cannot sit next to a starting system looking current.
+    try:
+        LINK_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
+
     logs = ROOT / "artifacts" / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     srv_log, wrk_log = logs / "server.log", logs / "worker.log"
@@ -567,6 +617,7 @@ def main() -> int:
 
     if public:
         link = f"{public}/?k={key}"
+        wrote = write_link_file(public, key, a.port)
         print(f"\n{G}Public link:{OFF}  {link}")
         print(f"{DIM}  agent UI    {public}/agent.html?k={key}{OFF}")
         print(f"{DIM}  Anyone with this link has full access. It is the "
@@ -575,6 +626,10 @@ def main() -> int:
               f"file to rotate it.{OFF}")
         print(f"{DIM}  The HOSTNAME still changes each run; see "
               f"DEPLOY_REMOTE.md for a fixed address.{OFF}")
+        if wrote:
+            print(f"\n{G}Also saved to:{OFF}  {wrote}")
+            print(f"{DIM}  Open that file any time instead of scrolling "
+                  f"back through this window.{OFF}")
         print(f"{DIM}  Closing this window closes the tunnel.{OFF}")
 
     print(f"\n{G}Open:{OFF}  {url}" + (f"/?k={key}" if key else ""))
@@ -615,6 +670,13 @@ def main() -> int:
                 except subprocess.TimeoutExpired:
                     proc.kill()
             print(f"  stopped {name}")
+        # The link in it is dead now. Leaving the file behind means someone
+        # copies yesterday's link out of it and cannot work out why the page
+        # will not load.
+        try:
+            LINK_FILE.unlink(missing_ok=True)
+        except OSError:
+            pass
         print()
     return 0
 
