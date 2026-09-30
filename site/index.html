@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OPHIRA — Diabetic Retinopathy Screening</title>
+<meta name="description" content="An explainable, uncertainty-aware diabetic retinopathy screening cascade. Research prototype — not a validated medical device.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2322d3ee' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#ffffff; --bg-2:#f6f8fa; --surface:#ffffff; --border:#d8dee6;
+  --border-2:#c2ccd8; --text:#10161d; --muted:#5a6672; --accent:#0a7c8e;
+  --accent-2:#065f6e; --warn-bg:#fff8e6; --warn-bd:#e8c96a; --warn-tx:#6b5310;
+  --danger:#b4232b; --ok:#1a7f45;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --r:10px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#070b10; --bg-2:#0c131b; --surface:#0f1720; --border:#1e2b38;
+    --border-2:#2b3d4e; --text:#e6edf3; --muted:#8fa1b3; --accent:#22d3ee;
+    --accent-2:#67e8f9; --warn-bg:#241d05; --warn-bd:#6b5310; --warn-tx:#f0d78a;
+    --danger:#f87171; --ok:#4ade80;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font:16px/1.65 var(--sans);
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:60rem;margin:0 auto;padding:0 16px}
+a{color:var(--accent);text-underline-offset:3px}
+a:hover{color:var(--accent-2)}
+h1,h2,h3{line-height:1.25;letter-spacing:-0.015em;margin:0}
+h2{font-size:clamp(1.3rem,3.4vw,1.75rem);margin:0 0 .5rem}
+h3{font-size:1.05rem;margin:0 0 .35rem}
+p{margin:0 0 1rem;max-width:68ch}
+code{font:0.88em/1.5 var(--mono);background:var(--bg-2);padding:.15em .4em;
+  border-radius:4px;border:1px solid var(--border)}
+pre{background:var(--bg-2);border:1px solid var(--border);border-radius:var(--r);
+  padding:1rem;overflow-x:auto;margin:0 0 1rem}
+pre code{background:none;border:0;padding:0;font-size:.85rem}
+
+/* ---------- header ---------- */
+header{border-bottom:1px solid var(--border);background:var(--surface)}
+.bar{display:flex;align-items:center;gap:.7rem;padding:1rem 16px;
+  max-width:60rem;margin:0 auto;flex-wrap:wrap}
+.mark{width:28px;height:28px;color:var(--accent);flex:none}
+.name{font-weight:700;font-size:1.15rem;letter-spacing:-0.02em}
+.sub{color:var(--muted);font-size:.8rem}
+.spacer{flex:1 1 auto}
+.tag{font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  padding:.3rem .6rem;border-radius:999px;border:1px solid var(--warn-bd);
+  background:var(--warn-bg);color:var(--warn-tx);white-space:nowrap}
+
+/* ---------- hero ---------- */
+.hero{padding:3rem 0 2rem;border-bottom:1px solid var(--border)}
+.hero h1{font-size:clamp(1.9rem,6vw,3rem);margin-bottom:.9rem}
+.hero .lede{font-size:clamp(1rem,2.4vw,1.15rem);color:var(--muted);max-width:60ch}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:1px;background:var(--border);border:1px solid var(--border);
+  border-radius:var(--r);overflow:hidden;margin-top:2rem}
+.stat{background:var(--surface);padding:1rem}
+.stat b{display:block;font-size:1.45rem;letter-spacing:-0.02em;font-variant-numeric:tabular-nums}
+.stat span{display:block;color:var(--muted);font-size:.78rem;margin-top:.15rem}
+
+/* ---------- sections ---------- */
+section{padding:2.5rem 0;border-bottom:1px solid var(--border)}
+.eyebrow{font-size:.72rem;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--accent);margin-bottom:.5rem}
+
+/* ---------- notice ---------- */
+.notice{border:1px solid var(--warn-bd);background:var(--warn-bg);color:var(--warn-tx);
+  border-radius:var(--r);padding:1.1rem 1.25rem;margin:0 0 1.5rem}
+.notice p{margin:0;max-width:none;font-size:.95rem}
+.notice strong{font-weight:700}
+
+/* ---------- pipeline ---------- */
+.pipe{display:grid;gap:1px;background:var(--border);border:1px solid var(--border);
+  border-radius:var(--r);overflow:hidden}
+.step{background:var(--surface);padding:.85rem 1rem;display:grid;
+  grid-template-columns:2.2rem 1fr;gap:.9rem;align-items:baseline}
+.step i{font-style:normal;font-family:var(--mono);font-size:.8rem;color:var(--accent);font-weight:700}
+.step b{font-weight:650}
+.step span{display:block;color:var(--muted);font-size:.85rem}
+.step.decide{background:var(--bg-2)}
+.step.decide i{color:var(--ok)}
+
+/* ---------- table ---------- */
+.scroll{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r)}
+table{border-collapse:collapse;width:100%;min-width:56rem;font-size:.86rem}
+th,td{text-align:left;padding:.7rem .85rem;border-bottom:1px solid var(--border);
+  vertical-align:top}
+thead th{background:var(--bg-2);font-size:.72rem;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--muted);font-weight:700;white-space:nowrap;
+  position:sticky;top:0}
+tbody tr:last-child td{border-bottom:0}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.note{color:var(--muted);min-width:22rem}
+.stage{font-family:var(--mono);font-size:.8rem;color:var(--accent);white-space:nowrap}
+
+/* ---------- limits ---------- */
+.limits{display:grid;gap:1px;background:var(--border);border:1px solid var(--border);
+  border-radius:var(--r);overflow:hidden}
+.limit{background:var(--surface);padding:1rem 1.15rem}
+.limit b{display:block;margin-bottom:.2rem}
+.limit span{color:var(--muted);font-size:.9rem}
+
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,17rem),1fr));gap:1.5rem}
+
+footer{padding:2rem 0 3rem;color:var(--muted);font-size:.85rem}
+footer p{max-width:70ch}
+.links{display:flex;gap:1.2rem;flex-wrap:wrap;margin-bottom:1.2rem}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>
+    </svg>
+    <div>
+      <div class="name">OPHIRA</div>
+      <div class="sub">Diabetic retinopathy screening</div>
+    </div>
+    <div class="spacer"></div>
+    <span class="tag">Research prototype</span>
+  </div>
+</header>
+
+<main>
+
+<div class="hero">
+  <div class="wrap">
+    <h1>An explainable, uncertainty&#8209;aware DR screening cascade.</h1>
+    <p class="lede">
+      Six stages from raw fundus photograph to a clinical route, where every
+      number a decision rests on is measured on a named dataset — and every
+      weakness is written down beside it.
+    </p>
+    <div class="stats">
+      <div class="stat"><b>0.895</b><span>QWK, DR grading, APTOS test (3 seeds)</span></div>
+      <div class="stat"><b>0.931</b><span>Referable sensitivity, external, calibrated</span></div>
+      <div class="stat"><b>6</b><span>Model stages in the cascade</span></div>
+      <div class="stat"><b>62</b><span>Agent tests, incl. bitwise parity vs the cascade</span></div>
+    </div>
+  </div>
+</div>
+
+<section>
+  <div class="wrap">
+    <div class="notice">
+      <p><strong>This is a research prototype, not a medical device.</strong>
+      It has no regulatory clearance and has not been validated in a clinical
+      trial. It screens; it does not diagnose. Every result requires review by
+      a qualified clinician. Nothing on this page should be used to make a
+      decision about a patient.</p>
+    </div>
+    <p>
+      This page describes the project. <strong>It is not the application</strong> —
+      there is nothing here to upload an image to. The working system runs on a
+      machine with MATLAB and is reached over a private tunnel; the
+      <a href="#running">last section</a> explains why it cannot be hosted here.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Pipeline</p>
+    <h2>What happens to an image</h2>
+    <p>
+      Each stage can stop the cascade. An image that fails the quality gate
+      never reaches a model, and a triage filter that sees nothing suspicious
+      ends the pass early — so most images cost far less than the full run.
+    </p>
+    <div class="pipe">
+      <div class="step"><i>0</i><div><b>Quality gate</b>
+        <span>Classical features decide whether the photograph is gradeable at all. Ungradeable images return RECAPTURE rather than a guess.</span></div></div>
+      <div class="step"><i>1</i><div><b>Triage filter</b>
+        <span>A small binary network asks whether anything warrants a closer look. Its threshold comes from site rules, not from the model file.</span></div></div>
+      <div class="step"><i>2</i><div><b>DR grading</b>
+        <span>EfficientNet&#8209;B0 with a CORAL ordinal head — severity is ordered, so the head predicts cumulative probabilities rather than independent classes.</span></div></div>
+      <div class="step"><i>2b</i><div><b>Maculopathy</b>
+        <span>A head on the frozen grading encoder. This refers independently of DR grade, because a low grade with macular involvement still needs an ophthalmologist.</span></div></div>
+      <div class="step"><i>3</i><div><b>Lesion segmentation</b>
+        <span>A U&#8209;Net tiled at native resolution marks exudates, microaneurysms and haemorrhages. Explanation only — no routing rule reads it.</span></div></div>
+      <div class="step"><i>—</i><div><b>Calibration &amp; uncertainty</b>
+        <span>Temperature scaling on the shared logit, with an uncertainty estimate that drives abstention when the model should not be trusted.</span></div></div>
+      <div class="step decide"><i>▸</i><div><b>Deterministic decision engine</b>
+        <span>Versioned rules — not a model — map the evidence to ROUTINE, REFERRAL, URGENT, RECAPTURE or HUMAN REVIEW. This is the only thing in the system that produces a clinical route.</span></div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Measured performance</p>
+    <h2>Every model, and how well it is known to work</h2>
+    <p>
+      These are this project's own evaluation results, each with the dataset it
+      was measured on. Nothing is a vendor claim and nothing is rounded up.
+      Where a component is weak, it says so in the same voice used for the
+      strong ones — a reviewer who sees only the good numbers has been misled.
+    </p>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Stage</th><th>Model</th><th>Params</th><th>Size</th>
+              <th>Metric</th><th>Dataset</th><th>What limits it</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="stage">0 — quality</td>
+            <td>quality_gate_v1 (classical)</td><td class="num">—</td><td class="num">—</td>
+            <td class="num">AUC 0.79</td><td>DeepDRiD held&#8209;out</td>
+            <td class="note">Weakest component. Rejected 19 of 71 referable images externally — a RECAPTURE is only safe if the retake actually happens.</td>
+          </tr>
+          <tr>
+            <td class="stage">1 — triage</td>
+            <td>MobileNetV2 binary filter</td><td class="num">~2.2 M</td><td class="num">10.3 MB</td>
+            <td class="num">sens(ref) 1.000 @ 53% esc.</td><td>APTOS frozen test</td>
+            <td class="note">Site&#8209;calibrated threshold from rulesV1. The value baked into the model file scored 0.493 externally and is not used.</td>
+          </tr>
+          <tr>
+            <td class="stage">2 — DR grading</td>
+            <td>EfficientNet&#8209;B0 + CORAL head</td><td class="num">~5.3 M</td><td class="num">17.8 MB</td>
+            <td class="num">QWK 0.895 ± 0.008</td><td>APTOS frozen test (3 seeds)</td>
+            <td class="note">External QWK 0.75. Referable sens 0.981 / spec 0.894 in&#8209;domain; 0.931 / 0.843 externally once calibrated.</td>
+          </tr>
+          <tr>
+            <td class="stage">2b — maculopathy</td>
+            <td>MLP head on frozen M1 encoder</td><td class="num">~0.33 M</td><td class="num">1.3 MB</td>
+            <td class="num">AUC 0.932</td><td>IDRiD test</td>
+            <td class="note">The IDRiD label is <em>defined</em> by exudate proximity to the fovea, so this is coupled to the exudate findings, not independent of them. External precision 0.209.</td>
+          </tr>
+          <tr>
+            <td class="stage">3 — lesions</td>
+            <td>U&#8209;Net, MobileNetV2 encoder, tiled</td><td class="num">~2.0 M</td><td class="num">7.8 MB</td>
+            <td class="num">Dice EX 0.613 · MA 0.424 · HE 0.404 · SE 0.095</td><td>IDRiD segmentation test</td>
+            <td class="note">Explanation only — no routing rule reads it. Soft&#8209;exudate localisation is unreliable; absence of a marking is not evidence of a healthy retina.</td>
+          </tr>
+          <tr>
+            <td class="stage">— calibration</td>
+            <td>Temperature scaling</td><td class="num">1 scalar</td><td class="num">0.02 MB</td>
+            <td class="num">T = 1.2200</td><td>APTOS calibration split</td>
+            <td class="note">Fitted on APTOS only. Per&#8209;site temperature was tested and rejected: it minimises ECE but destroys the threshold and the uncertainty ranking.</td>
+          </tr>
+          <tr>
+            <td class="stage">XAI</td>
+            <td>Grad&#8209;CAM on the M1 feature map</td><td class="num">—</td><td class="num">—</td>
+            <td class="num">IoU 0.052 · mass lift 2.2×</td><td>IDRiD vs expert masks</td>
+            <td class="note"><strong>Does not localise lesions.</strong> The supervised lesion branch reaches 5.3× on the same metric. Shown as model attention, never as a map of disease.</td>
+          </tr>
+          <tr>
+            <td class="stage">9 — decision</td>
+            <td>decision_rules_v1 (deterministic)</td><td class="num">—</td><td class="num">—</td>
+            <td class="num">21 scenario tests</td><td>— cannot be validated on public data</td>
+            <td class="note">No public dataset pairs fundus images with symptoms, visual acuity and grade. <strong>The only source of a clinical route.</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Honest limits</p>
+    <h2>What this system does not do</h2>
+    <div class="limits">
+      <div class="limit"><b>It does not diagnose.</b>
+        <span>It sorts images into routes so a clinician sees the urgent ones first. The route is a triage decision, not a finding.</span></div>
+      <div class="limit"><b>Its explanations are not a map of disease.</b>
+        <span>Grad&#8209;CAM reaches IoU 0.052 against expert lesion masks. It shows where the network looked, which is not where the disease is. The report labels it that way.</span></div>
+      <div class="limit"><b>Performance drops off&#8209;domain.</b>
+        <span>QWK falls from 0.895 to 0.75 on an external set. Per&#8209;site calibration is mandatory — uncalibrated, external referable sensitivity measured 0.507 against 0.904 calibrated.</span></div>
+      <div class="limit"><b>The quality gate is the weak link.</b>
+        <span>It rejected 19 of 71 referable images externally. Those become RECAPTURE, which is only safe in a workflow where the retake reliably happens.</span></div>
+      <div class="limit"><b>The decision rules are untested on real outcomes.</b>
+        <span>No public dataset pairs fundus images with symptoms, acuity and grade, so the rules are covered by 21 scenario tests rather than by clinical validation.</span></div>
+      <div class="limit"><b>An absent marking means nothing.</b>
+        <span>Soft&#8209;exudate Dice is 0.095. A retina with no lesions drawn on it has not been shown to be healthy.</span></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Orchestration</p>
+    <h2>An agent that gathers evidence, and never decides</h2>
+    <div class="cols">
+      <div>
+        <p>
+          An observe&#8209;plan&#8209;act&#8209;replan layer chooses which stages to run
+          for a given case and adapts when a capture is poor or a result is
+          ambiguous. It calls eight registered tools; capabilities it must not
+          have are not withheld from it, they simply do not exist as tools.
+        </p>
+        <p>
+          The boundary is structural rather than advisory: a clinical route
+          that did not come from the deterministic engine raises an error at
+          construction. A parity test asserts the agent's numbers are
+          <em>bitwise identical</em> to the plain cascade's, because two copies
+          of medical logic drift, and a drifted copy would hand a clinician
+          figures no validated pipeline ever produced.
+        </p>
+      </div>
+      <div>
+        <h3>Verified, not asserted</h3>
+        <p style="color:var(--muted);font-size:.92rem">
+          Agent off vs on, same image, same session:
+        </p>
+        <pre><code>route      REFERRAL == REFERRAL
+grade             2 == 2
+referable  0.959832 == 0.959832
+uncertainty 0.523059 == 0.523059</code></pre>
+        <p style="color:var(--muted);font-size:.92rem;margin:0">
+          62 agent tests, 21 decision scenarios. The agent reorders work; it
+          cannot change an answer.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="running">
+  <div class="wrap">
+    <p class="eyebrow">Architecture</p>
+    <h2>Why the live system is not hosted on this domain</h2>
+    <p>
+      Every stage is MATLAB code loading a <code>.mat</code> file. No serverless
+      platform offers MATLAB, it cannot be installed into a function image, and
+      the licence is bound to a machine. The job queue is a directory that two
+      processes share, which a stateless function with an ephemeral disk cannot
+      participate in.
+    </p>
+    <p>
+      So the system runs on a workstation and is reached through an outbound
+      tunnel, gated by an access key checked on every request. This page is
+      static documentation; the application is not deployed here and no image
+      submitted to this domain would reach a model.
+    </p>
+    <pre><code>python run.py --tunnel</code></pre>
+    <p style="color:var(--muted);font-size:.92rem">
+      Starts the session server, the MATLAB worker and the tunnel as one
+      process group, prints a key&#8209;gated HTTPS link, and tears all three down
+      together on exit.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/knpranavranjan/DRagent-">Source on GitHub</a>
+      <a href="https://github.com/knpranavranjan/DRagent-/blob/main/DEPLOYMENT_MANIFEST.md">Deployment manifest</a>
+      <a href="https://github.com/knpranavranjan/DRagent-/blob/main/AGENT_ARCHITECTURE.md">Agent architecture</a>
+      <a href="https://github.com/knpranavranjan/DRagent-/blob/main/DEPLOY_REMOTE.md">Remote deployment</a>
+    </div>
+    <p>
+      OPHIRA is a research prototype. It is not a clinically validated medical
+      device and must not be used to make a diagnosis. Every result requires
+      clinician review. Evaluation used the public APTOS 2019, IDRiD and
+      DeepDRiD datasets under their respective terms.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
