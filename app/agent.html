@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OPHIRA — Agentic Screening</title>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/agent.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand__mark" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/>
+      <circle cx="12" cy="12" r="3"/>
+    </svg>
+    <div>
+      <div class="brand__name">OPHIRA</div>
+      <div class="brand__sub">Agentic screening</div>
+    </div>
+  </div>
+
+  <div class="topbar__right">
+    <span class="agent-badge" id="agentBadge"><i aria-hidden="true"></i><b>AGENT IDLE</b></span>
+    <a class="btn btn--ghost btn--sm" href="/">Encounter app</a>
+    <button class="icon-btn" id="theme-toggle" type="button"
+            aria-label="Switch between light and dark appearance"></button>
+  </div>
+</header>
+
+<main id="main">
+<div class="ag-page">
+
+  <!-- ============================================ 1. capture ========= -->
+  <section class="card" aria-labelledby="h-capture">
+    <div class="card__head">
+      <div>
+        <h2 class="card__title" id="h-capture">1 · Fundus capture</h2>
+        <p class="card__hint">Two macula fields are required, one per eye.
+           Disc fields are optional. Each capture is assessed and graded on
+           its own — an eye is not made safe by the other eye looking fine.</p>
+      </div>
+      <button class="btn btn--ghost btn--sm" id="demoBtn" type="button">Use sample image</button>
+    </div>
+
+    <div class="ag-slots" id="slots"></div>
+
+    <div class="ag-runbar">
+      <label class="ag-field ag-field--sm">
+        <span>Site</span>
+        <input type="text" id="site" value="default"
+               aria-describedby="siteHelp">
+      </label>
+      <p class="ag-help" id="siteHelp">
+        Thresholds are per site. <code>default</code> is APTOS-fitted and
+        measured 0.507 referable sensitivity on external data.
+      </p>
+      <label class="ag-check">
+        <input type="checkbox" id="useLlm" checked>
+        <span>Use LLM planner if one is reachable</span>
+      </label>
+      <button class="btn btn--primary" id="runBtn" type="button" disabled>
+        Run agent
+      </button>
+    </div>
+    <p class="ag-note" id="runNote" role="status" aria-live="polite"></p>
+  </section>
+
+  <!-- ============================================ 2. status ========== -->
+  <section class="ag-strip" aria-label="Run status">
+    <div class="ag-stat"><span>Case</span><b id="stCase">—</b></div>
+    <div class="ag-stat"><span>State</span><b id="stState">—</b></div>
+    <div class="ag-stat"><span>Images</span><b id="stImages">0</b></div>
+    <div class="ag-stat"><span>Tools run</span><b id="stTools">0</b></div>
+    <div class="ag-stat"><span>Replans</span><b id="stReplans">0</b></div>
+    <div class="ag-stat"><span>Evidence</span><b id="stEvidence">0</b></div>
+    <div class="ag-stat"><span>Elapsed</span><b id="stMs">—</b></div>
+  </section>
+
+  <!-- ============================================ 3. pipeline ======== -->
+  <section class="card" aria-labelledby="h-flow">
+    <h2 class="card__title" id="h-flow">2 · Pipeline</h2>
+    <p class="card__hint">Each stage lights only when it actually runs.
+       A stage the agent skips stays dimmed — that is the evidence of
+       adaptive behaviour, so it is shown rather than hidden.</p>
+    <ol class="ag-flow" id="flow">
+      <li class="ag-node" data-k="quality"><b>Quality</b><span>classical gate</span></li>
+      <li class="ag-node" data-k="triage"><b>Triage</b><span>m3</span></li>
+      <li class="ag-node" data-k="grading"><b>DR grading</b><span>m1 · CORAL</span></li>
+      <li class="ag-node" data-k="maculopathy"><b>Maculopathy</b><span>m4</span></li>
+      <li class="ag-node ag-node--engine" data-k="decision"><b>Decision engine</b><span>deterministic</span></li>
+      <li class="ag-node" data-k="lesions"><b>Lesions</b><span>m5</span></li>
+      <li class="ag-node" data-k="xai"><b>XAI</b><span>Grad-CAM</span></li>
+    </ol>
+  </section>
+
+  <!-- ============================================ 4. work =========== -->
+  <div class="ag-cols">
+
+    <section class="card" aria-labelledby="h-trace">
+      <div class="card__head">
+        <h2 class="card__title" id="h-trace">3 · Agent trace</h2>
+        <label class="ag-check ag-check--sm">
+          <input type="checkbox" id="showObs">
+          <span>Show observations</span>
+        </label>
+      </div>
+      <p class="card__hint">Generated from the run. Every line is a real
+         event with a real result.</p>
+      <ol class="ag-trace" id="trace" aria-live="polite">
+        <li class="ag-empty">No run yet.</li>
+      </ol>
+    </section>
+
+    <div class="ag-side">
+
+      <section class="card" aria-labelledby="h-now">
+        <h2 class="card__title" id="h-now">Current action</h2>
+        <div class="ag-now">
+          <div class="ag-now__tool" id="nowTool">Idle</div>
+          <div class="ag-now__why" id="nowWhy">Load one or more captures and run the agent.</div>
+        </div>
+      </section>
+
+      <section class="card" id="decCard" hidden aria-labelledby="h-dec">
+        <h2 class="card__title" id="h-dec">Final deterministic decision</h2>
+        <div class="ag-route" id="decRoute">—</div>
+        <ul class="ag-reasons" id="decReasons"></ul>
+        <dl class="ag-kv">
+          <dt>Source</dt><dd><code id="decSource">decisionEngine</code></dd>
+          <dt>Ruleset</dt><dd><code id="decRules">—</code></dd>
+          <dt>Governing field</dt><dd id="decSlot">—</dd>
+        </dl>
+        <p class="ag-boundary">
+          The agent orchestrated evidence collection.
+          <b>The deterministic decision engine produced the clinical route.</b>
+        </p>
+      </section>
+
+      <section class="card" id="synCard" hidden aria-labelledby="h-syn">
+        <h2 class="card__title" id="h-syn">Agent synthesis</h2>
+        <p id="synText"></p>
+        <p class="ag-note">Narrative only, written after the route was
+           decided. Source: <code id="synSrc">—</code></p>
+      </section>
+
+      <section class="card" id="dlCard" hidden aria-labelledby="h-dl">
+        <h2 class="card__title" id="h-dl">Report</h2>
+        <div class="actions actions--wrap">
+          <button class="btn btn--primary btn--sm" id="pdfBtn" type="button">
+            Agent report (PDF)
+          </button>
+          <button class="btn btn--ghost btn--sm" id="htmlBtn" type="button">
+            Download HTML
+          </button>
+          <button class="btn btn--ghost btn--sm" id="jsonBtn" type="button">
+            Download trace (JSON)
+          </button>
+        </div>
+        <p class="ag-note">The PDF opens your browser's print dialog —
+           "Save as PDF" is a destination there. One document, one layout.</p>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- ============================================ 5. per image ======= -->
+  <section class="card" id="perImgCard" hidden aria-labelledby="h-per">
+    <h2 class="card__title" id="h-per">4 · Result by capture</h2>
+    <p class="card__hint">Each field is graded independently. The session
+       route is the most severe of them.</p>
+    <div class="ag-tablewrap">
+      <table class="ag-table" id="perImgTable">
+        <thead>
+          <tr>
+            <th scope="col">Field</th><th scope="col">Quality</th>
+            <th scope="col">Triage</th><th scope="col">DR grade</th>
+            <th scope="col">Uncertainty</th><th scope="col">Maculopathy</th>
+            <th scope="col">Lesions</th><th scope="col">Route</th>
+            <th scope="col">Tools</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================================ 6. models ========== -->
+  <section class="card" aria-labelledby="h-models">
+    <div class="card__head">
+      <div>
+        <h2 class="card__title" id="h-models">5 · Models in this pipeline</h2>
+        <p class="card__hint">Every figure is a measured result from this
+           project's own evaluation, with the dataset named. Weak components
+           are stated in the same voice as strong ones.</p>
+      </div>
+      <button class="btn btn--ghost btn--sm" id="modelsToggle" type="button"
+              aria-expanded="true" aria-controls="modelsWrap">Hide</button>
+    </div>
+    <div class="ag-tablewrap" id="modelsWrap">
+      <table class="ag-table ag-table--models">
+        <thead>
+          <tr>
+            <th scope="col">Stage</th><th scope="col">Model</th>
+            <th scope="col">Params</th><th scope="col">Size</th>
+            <th scope="col">Measured</th><th scope="col">Dataset</th>
+            <th scope="col">What it does not tell you</th>
+          </tr>
+        </thead>
+        <tbody id="modelsBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================================ 7. runtime ========= -->
+  <section class="card" aria-labelledby="h-rt">
+    <h2 class="card__title" id="h-rt">Runtime</h2>
+    <dl class="ag-kv ag-kv--wide">
+      <dt>Agent version</dt><dd id="vAgent">—</dd>
+      <dt>Decision engine</dt><dd id="vEngine">—</dd>
+      <dt>LLM provider</dt><dd id="vLlm">—</dd>
+      <dt>Registered tools</dt><dd id="vTools">—</dd>
+    </dl>
+    <p class="ag-note">A provider is named here only when it is actually
+       reachable and actually used.</p>
+  </section>
+
+</div>
+</main>
+
+<footer class="footer">
+  OPHIRA is a research prototype. It is not a clinically validated medical
+  device and must not be used to make a diagnosis. Every result requires
+  clinician review.
+</footer>
+
+<script type="module" src="js/agent.js"></script>
+</body>
+</html>

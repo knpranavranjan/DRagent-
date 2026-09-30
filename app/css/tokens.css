@@ -1,0 +1,149 @@
+/* ==========================================================================
+   OPHIRA — Design tokens
+   --------------------------------------------------------------------------
+   Clinical screening kiosk. Operator-facing, touchscreen, offline.
+
+   Three rules encoded here, because they are safety properties and not
+   aesthetic preferences:
+
+   1. DANGER RED IS RESERVED. --c-danger appears only for urgent escalation
+      and destructive actions. It is never used decoratively. If red on this
+      screen does not mean "a clinician must see this", the meaning is
+      diluted and the one time it matters it will be missed.
+
+   2. TOUCH TARGETS ARE OVERSIZED. 56px, not the 44/48px minimum. The
+      operator may be wearing gloves, standing, in poor light, and hurrying.
+      A mis-tap here becomes a wrong clinical record.
+
+   3. LIGHT MODE IS THE DEFAULT. Screening happens in bright rooms and
+      daylight. Dark mode exists but is not the primary target.
+   ========================================================================== */
+
+:root {
+  /* --- brand / semantic colour ------------------------------------------ */
+  --c-primary:          #0E7490;   /* cyan-700: deepened for daylight contrast */
+  --c-primary-hover:    #155E75;
+  --c-primary-soft:     #ECFEFF;
+  --c-on-primary:       #FFFFFF;
+
+  --c-danger:           #DC2626;   /* RESERVED: urgent + destructive only     */
+  --c-danger-soft:      #FEF2F2;
+  --c-danger-border:    #FCA5A5;
+  --c-on-danger:        #FFFFFF;
+
+  --c-warn:             #B45309;
+  --c-warn-soft:        #FFFBEB;
+  --c-warn-border:      #FCD34D;
+
+  --c-ok:               #047857;
+  --c-ok-soft:          #ECFDF5;
+  --c-ok-border:        #6EE7B7;
+
+  /* --- surfaces --------------------------------------------------------- */
+  --c-bg:               #F1F5F9;
+  --c-surface:          #FFFFFF;
+  --c-surface-2:        #F8FAFC;
+  --c-border:           #CBD5E1;
+  --c-border-strong:    #94A3B8;
+
+  /* --- text ------------------------------------------------------------- */
+  --c-text:             #0F172A;   /* 16.1:1 on white */
+  --c-text-muted:       #475569;   /*  8.6:1 on white — still AA for body */
+  --c-text-faint:       #64748B;   /*  5.7:1 — labels only, never body   */
+
+  --c-focus:            #0E7490;
+
+  /* --- typography -------------------------------------------------------
+     Self-hosting Figtree/Noto Sans is the eventual plan (see docs). Until
+     then this stack is used: no CDN, because the Pi has no internet in
+     deployment and a blocked font request would stall first paint.        */
+  --font-sans: "Figtree", "Noto Sans", system-ui, -apple-system,
+               "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", "Cascadia Mono", Consolas, "Roboto Mono", monospace;
+
+  --fs-xs:    0.8125rem;  /* 13px — labels, meta. Never body copy.  */
+  --fs-sm:    0.9375rem;  /* 15px */
+  --fs-base:  1.0625rem;  /* 17px — body. Larger than web default:
+                                    the operator reads at arm's length. */
+  --fs-lg:    1.25rem;
+  --fs-xl:    1.5rem;
+  --fs-2xl:   1.875rem;
+  --fs-3xl:   2.25rem;
+
+  --lh-tight: 1.25;
+  --lh-body:  1.55;
+
+  /* --- spacing: 4px rhythm ---------------------------------------------- */
+  --s-1: 0.25rem;  --s-2: 0.5rem;   --s-3: 0.75rem;  --s-4: 1rem;
+  --s-5: 1.25rem;  --s-6: 1.5rem;   --s-8: 2rem;     --s-10: 2.5rem;
+  --s-12: 3rem;    --s-16: 4rem;
+
+  /* --- touch ------------------------------------------------------------ */
+  --tap-min: 48px;   /* absolute floor  */
+  --tap:     56px;   /* standard target */
+  --tap-lg:  64px;   /* primary actions */
+
+  /* --- shape / depth ---------------------------------------------------- */
+  --r-sm: 6px;  --r-md: 10px;  --r-lg: 14px;  --r-full: 999px;
+
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.06),
+              0 1px 3px rgba(15, 23, 42, 0.08);
+  --shadow-2: 0 4px 6px -1px rgba(15, 23, 42, 0.08),
+              0 2px 4px -2px rgba(15, 23, 42, 0.06);
+  --shadow-3: 0 12px 20px -6px rgba(15, 23, 42, 0.14);
+
+  /* --- motion: subtle. This is a clinical tool, not a showcase. --------- */
+  --t-fast: 120ms;
+  --t-base: 180ms;
+  --ease:   cubic-bezier(0.2, 0, 0.2, 1);
+
+  /* --- layering --------------------------------------------------------- */
+  --z-base: 0; --z-sticky: 10; --z-overlay: 100; --z-modal: 200; --z-toast: 300;
+
+  --content-max: 56rem;
+}
+
+/* --------------------------------------------------------------------------
+   Dark mode. Provided for low-light camera rooms, where a bright screen
+   dazzles the operator between captures. Explicitly opt-in via
+   data-theme="dark" -- it does NOT follow the OS, because a clinic tablet
+   left on auto would flip theme mid-encounter.
+   -------------------------------------------------------------------------- */
+:root[data-theme="dark"] {
+  --c-primary:       #22D3EE;
+  --c-primary-hover: #67E8F9;
+  --c-primary-soft:  #083344;
+  --c-on-primary:    #042F2E;
+
+  --c-danger:        #F87171;
+  --c-danger-soft:   #450A0A;
+  --c-danger-border: #B91C1C;
+  --c-on-danger:     #450A0A;
+
+  --c-warn:          #FBBF24;
+  --c-warn-soft:     #451A03;
+  --c-warn-border:   #B45309;
+
+  --c-ok:            #34D399;
+  --c-ok-soft:       #022C22;
+  --c-ok-border:     #047857;
+
+  --c-bg:            #020617;
+  --c-surface:       #0F172A;
+  --c-surface-2:     #1E293B;
+  --c-border:        #334155;
+  --c-border-strong: #475569;
+
+  --c-text:          #F8FAFC;
+  --c-text-muted:    #CBD5E1;
+  --c-text-faint:    #94A3B8;
+  --c-focus:         #22D3EE;
+
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-2: 0 4px 6px -1px rgba(0,0,0,0.5);
+  --shadow-3: 0 12px 20px -6px rgba(0,0,0,0.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-fast: 0ms; --t-base: 0ms; }
+}

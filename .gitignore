@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# OPHIRA DRagent — what never belongs in version control
+# ---------------------------------------------------------------------------
+
+# RUNTIME PATIENT DATA. This is where captures, job files, generated reports
+# and agent traces land. It is clinical data, not source. The directory
+# skeleton is tracked (see the .gitkeep rules below) because the app needs
+# it to exist; nothing inside it is.
+data/sessions/**
+!data/sessions/
+!data/sessions/*/
+!data/sessions/jobs/*/
+!data/sessions/**/.gitkeep
+
+# Generated at runtime.
+artifacts/logs/
+artifacts/reports/
+artifacts/demo/
+artifacts/ui/
+artifacts/e2e_sessions/
+
+# Python build artefacts.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Node, only used by the browser tests.
+node_modules/
+package-lock.json
+
+# Editor and OS noise.
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# MATLAB scratch.
+*.asv
+*.m~
+slprj/

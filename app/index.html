@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>OPHIRA — Screening Encounter</title>
+<meta name="description" content="Diabetic retinopathy screening encounter workflow. Research prototype.">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230E7490' stroke-width='2'><path d='M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z'/><circle cx='12' cy='12' r='3'/></svg>">
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand__mark" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/>
+        <circle cx="12" cy="12" r="3"/>
+      </svg>
+      <div>
+        <div class="brand__name">OPHIRA</div>
+        <div class="brand__sub">Screening encounter</div>
+      </div>
+    </div>
+
+    <div class="topbar__spacer"></div>
+
+    <span class="session-chip alert--urgent" id="urgent-chip" role="alert" hidden
+          style="border-radius: var(--r-full); font-weight: 700;"></span>
+
+    <span class="saved" id="save-state" aria-live="polite"></span>
+
+    <span class="session-chip">
+      <span class="sr-only">Session identifier</span>
+      <span id="session-id">…</span>
+    </span>
+
+    <!-- The agentic view runs the same models through an orchestration
+         layer that chooses which evidence to gather. Same pipeline, same
+         decision engine. -->
+    <a class="btn btn--ghost btn--sm" href="/agent.html"
+       title="Run a case through the agentic orchestration layer">Agent view</a>
+    <button class="btn btn--ghost btn--sm" id="theme-toggle" type="button"
+            style="min-width: var(--tap-min); padding: 0 var(--s-3);"></button>
+  </header>
+
+  <nav class="steps" id="steps" aria-label="Encounter steps"></nav>
+
+  <main class="main" id="main"></main>
+
+  <footer class="disclaimer">
+    OPHIRA is a research prototype. It is not a clinically validated medical device
+    and must not be used to make a diagnosis. Every result requires clinician review.
+  </footer>
+
+</div>
+
+<noscript>
+  <div style="padding:2rem;max-width:40rem;margin:0 auto">
+    <h1>JavaScript is required</h1>
+    <p>This screening workflow cannot run without JavaScript enabled.</p>
+  </div>
+</noscript>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

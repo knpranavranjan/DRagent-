@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>OPHIRA — Training Dashboard</title>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230E7490' stroke-width='2'><path d='M22 12h-4l-3 9L9 3l-3 9H2'/></svg>">
+<style>
+  .dash { max-width: 72rem; margin: 0 auto; padding: var(--s-5); }
+  .dash-grid { display: grid; gap: var(--s-4); grid-template-columns: repeat(auto-fit, minmax(210px,1fr)); margin-bottom: var(--s-5); }
+  .stat { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: var(--s-4) var(--s-5); }
+  .stat__k { font-size: var(--fs-xs); color: var(--c-text-faint); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+  .stat__v { font-size: var(--fs-2xl); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; margin-top: var(--s-1); }
+  .stat__s { font-size: var(--fs-xs); color: var(--c-text-muted); margin-top: 2px; }
+  .stat--run  { border-color: var(--c-primary); background: var(--c-primary-soft); }
+  .stat--warn { border-color: var(--c-warn-border); background: var(--c-warn-soft); }
+
+  table.res { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+  table.res th { text-align: left; font-size: var(--fs-xs); text-transform: uppercase;
+                 letter-spacing: .04em; color: var(--c-text-faint); padding: var(--s-2) var(--s-3);
+                 border-bottom: 2px solid var(--c-border); }
+  table.res td { padding: var(--s-2) var(--s-3); border-bottom: 1px solid var(--c-border);
+                 font-variant-numeric: tabular-nums; }
+  table.res tr:last-child td { border-bottom: 0; }
+  .pill { display: inline-block; padding: 1px var(--s-2); border-radius: var(--r-full);
+          font-size: var(--fs-xs); font-weight: 700; }
+  .pill--pass { background: var(--c-ok-soft);   color: var(--c-ok);   border: 1px solid var(--c-ok-border); }
+  .pill--fail { background: var(--c-warn-soft); color: var(--c-warn); border: 1px solid var(--c-warn-border); }
+  .bar { height: 7px; background: var(--c-surface-2); border-radius: var(--r-full); overflow: hidden; margin-top: var(--s-2); }
+  .bar > i { display: block; height: 100%; background: var(--c-primary); transition: width .4s var(--ease); }
+  pre.log { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: var(--r-md);
+            padding: var(--s-4); font-size: 12px; line-height: 1.5; overflow-x: auto; margin: 0;
+            max-height: 320px; overflow-y: auto; font-family: var(--font-mono); }
+  .muted { color: var(--c-text-faint); font-size: var(--fs-xs); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand__mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+    </svg>
+    <div>
+      <div class="brand__name">OPHIRA</div>
+      <div class="brand__sub">Training dashboard</div>
+    </div>
+  </div>
+  <div class="topbar__spacer"></div>
+  <span class="session-chip" id="clock">—</span>
+  <span class="session-chip" id="refresh">auto 30 s</span>
+</header>
+
+<main class="dash">
+  <div class="dash-grid" id="stats"></div>
+
+  <div class="card">
+    <h2 class="card__title">Active training run</h2>
+    <p class="card__hint" id="run-sub">—</p>
+    <div class="bar"><i id="run-bar" style="width:0%"></i></div>
+    <pre class="log" id="run-log">waiting for log…</pre>
+  </div>
+
+  <div class="card">
+    <h2 class="card__title">Accuracy scoreboard</h2>
+    <p class="card__hint">Latest measurement per model and metric, against its acceptance gate.
+       Source: <code>artifacts/results.csv</code>, written by the training scripts themselves.</p>
+    <table class="res"><thead><tr>
+      <th>Model</th><th>Metric</th><th>Value</th><th>Target</th><th></th><th>Dataset</th>
+    </tr></thead><tbody id="results"><tr><td colspan="6" class="muted">loading…</td></tr></tbody></table>
+  </div>
+
+  <p class="muted" style="text-align:center">
+    Research prototype. Every figure is a measurement on a held-out split, not a validated claim.
+  </p>
+</main>
+
+<script>
+const GATES = { auc:0.85, auc_referable:0.85, qwk:0.85,
+                dice_EX:0.53, dice_HE:0.44, dice_MA:0.20, dice_SE:0.40,
+                sens_referable:0.90, ece:0.05 };
+const LOWER_IS_BETTER = new Set(["ece"]);
+
+const el = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+function stat(k, v, sub, cls) {
+  return `<div class="stat ${cls||''}"><div class="stat__k">${esc(k)}</div>
+          <div class="stat__v">${esc(v)}</div>
+          ${sub ? `<div class="stat__s">${esc(sub)}</div>` : ''}</div>`;
+}
+
+async function tick() {
+  el('clock').textContent = new Date().toLocaleTimeString();
+  let d;
+  try {
+    d = await (await fetch('/api/training?t=' + Date.now())).json();
+  } catch {
+    el('run-log').textContent = 'Dashboard cannot reach the server.\nStart it with:  python app/server/ophira_server.py';
+    return;
+  }
+
+  // ---- summary tiles
+  const r = d.run || {};
+  const running = !!r.active;
+  el('stats').innerHTML = [
+    stat('Status', running ? 'TRAINING' : 'idle',
+         running ? (r.name || '') : 'no MATLAB job detected',
+         running ? 'stat--run' : 'stat--warn'),
+    stat('Epoch', r.epoch != null ? `${r.epoch}/${r.epochs ?? '?'}` : '—',
+         r.iter ? `iter ${r.iter}/${r.iter_total}` : (r.stage || '')),
+    stat('Elapsed', r.elapsed_min != null ? `${r.elapsed_min.toFixed(0)} min` : '—',
+         r.eta_min != null ? `~${r.eta_min.toFixed(0)} min left` : ''),
+    stat('Models trained', d.models_trained ?? '—', `${d.gates_passed ?? 0} of ${d.gates_total ?? 0} gates passed`),
+    stat('GPU', d.gpu ? `${d.gpu.util}%` : '—',
+         d.gpu ? `${d.gpu.mem_used} / ${d.gpu.mem_total} MiB · ${d.gpu.temp}°C` : 'nvidia-smi unavailable'),
+    stat('Disk free', d.disk_free_gb != null ? `${d.disk_free_gb} GB` : '—', 'of 1.8 TB'),
+  ].join('');
+
+  // ---- active run
+  el('run-sub').textContent = r.name
+      ? `${r.name}  ·  ${r.log || ''}` : 'No training job is currently running.';
+  const pct = r.progress != null ? Math.round(100 * r.progress)
+            : (r.epoch && r.epochs) ? Math.round(100 * r.epoch / r.epochs) : 0;
+  el('run-bar').style.width = pct + '%';
+  el('run-log').textContent = (d.log_tail || []).join('\n') || 'no output yet';
+  el('run-log').scrollTop = el('run-log').scrollHeight;
+
+  // ---- scoreboard
+  const rows = d.results || [];
+  el('results').innerHTML = rows.length ? rows.map(x => {
+    const tgt = GATES[x.metric];
+    let pill = '';
+    if (tgt != null) {
+      const pass = LOWER_IS_BETTER.has(x.metric) ? x.value <= tgt : x.value >= tgt;
+      pill = `<span class="pill pill--${pass ? 'pass' : 'fail'}">${pass ? 'PASS' : 'below'}</span>`;
+    }
+    return `<tr><td>${esc(x.model)}</td><td>${esc(x.metric)}</td>
+            <td><strong>${x.value.toFixed(4)}</strong></td>
+            <td>${tgt != null ? tgt.toFixed(2) : '—'}</td>
+            <td>${pill}</td><td class="muted">${esc(x.dataset || '')} ${esc(x.split || '')}</td></tr>`;
+  }).join('') : '<tr><td colspan="6" class="muted">no results recorded yet</td></tr>';
+}
+
+tick();
+setInterval(tick, 30000);
+</script>
+</body>
+</html>

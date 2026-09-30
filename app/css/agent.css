@@ -1,0 +1,272 @@
+/* Agentic screening view.
+ *
+ * Dense by intent: this is a clinical tool read at a desk, not a landing
+ * page. Everything uses the existing OPHIRA tokens, so light and dark are
+ * defined together and neither is an afterthought.
+ */
+
+/* ---------- page shell --------------------------------------------------- */
+.ag-page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: var(--s-5) var(--s-5) var(--s-8);
+  display: flex; flex-direction: column; gap: var(--s-4);
+}
+@media (max-width: 720px) { .ag-page { padding: var(--s-4) var(--s-3) var(--s-7); } }
+
+.topbar__right { display: flex; align-items: center; gap: var(--s-3); }
+
+.card__head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: var(--s-4); margin-bottom: var(--s-2);
+}
+.card__head .card__title, .card__head .card__hint { margin: 0; }
+.card__head .card__hint { margin-top: 2px; }
+
+/* ---------- agent badge -------------------------------------------------- */
+.agent-badge {
+  display: inline-flex; align-items: center; gap: var(--s-2);
+  padding: 6px var(--s-3); border-radius: 999px;
+  border: 1px solid var(--c-border-strong); background: var(--c-surface);
+  font-size: var(--fs-xs); font-weight: 700; letter-spacing: .05em;
+  color: var(--c-text-faint); white-space: nowrap;
+}
+.agent-badge i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.agent-badge.is-active { color: var(--c-ok); border-color: var(--c-ok-border); }
+.agent-badge.is-active i { animation: ag-pulse 1.4s ease-in-out infinite; }
+@keyframes ag-pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+@media (prefers-reduced-motion: reduce) { .agent-badge.is-active i { animation: none } }
+
+/* ---------- capture slots ------------------------------------------------ */
+.ag-slots {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: var(--s-3); margin: var(--s-3) 0;
+}
+.ag-slot {
+  position: relative; display: flex; flex-direction: column; gap: 8px;
+  padding: var(--s-3); border-radius: var(--r-md);
+  border: 1px dashed var(--c-border-strong); background: var(--c-surface-2);
+  transition: border-color var(--t-base), background var(--t-base);
+}
+.ag-slot.is-set {
+  border-style: solid; border-color: var(--c-ok-border); background: var(--c-ok-soft);
+}
+.ag-slot__top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.ag-slot__top b { font-size: var(--fs-sm); }
+.ag-req, .ag-opt {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700;
+}
+.ag-req { color: var(--c-warn); }
+.ag-opt { color: var(--c-text-faint); }
+.ag-slot__empty { font-size: var(--fs-xs); color: var(--c-text-faint); }
+.ag-slot__file {
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--fs-xs); color: var(--c-ok); min-width: 0;
+}
+.ag-slot__file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-slot__file svg { width: 14px; height: 14px; flex: none; }
+.ag-slot label.btn { align-self: flex-start; cursor: pointer; }
+.ag-slot__clear {
+  position: absolute; top: 6px; right: 6px;
+  width: 24px; height: 24px; border-radius: var(--r-sm);
+  border: 1px solid transparent; background: transparent;
+  color: var(--c-text-faint); font-size: 16px; line-height: 1; cursor: pointer;
+}
+.ag-slot__clear:hover { border-color: var(--c-danger-border); color: var(--c-danger); }
+
+/* ---------- run bar ------------------------------------------------------ */
+.ag-runbar {
+  display: flex; flex-wrap: wrap; align-items: end; gap: var(--s-3);
+  padding-top: var(--s-3); border-top: 1px solid var(--c-border);
+}
+.ag-field { display: flex; flex-direction: column; gap: 4px; }
+.ag-field--sm { flex: 0 0 150px; }
+.ag-field span { font-size: var(--fs-xs); color: var(--c-text-faint); font-weight: 600; }
+.ag-field input {
+  padding: 7px var(--s-3); border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-sm); background: var(--c-bg); color: var(--c-text);
+  font: inherit; font-size: var(--fs-sm); min-height: 38px;
+}
+.ag-field input:focus-visible { outline: 2px solid var(--c-primary); outline-offset: 1px; }
+.ag-help { flex: 1 1 260px; margin: 0; font-size: var(--fs-xs); color: var(--c-text-faint); line-height: 1.5; }
+.ag-check { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); cursor: pointer; }
+.ag-check--sm { font-size: var(--fs-xs); color: var(--c-text-faint); }
+.ag-check input { width: 16px; height: 16px; cursor: pointer; }
+.ag-runbar .btn--primary { margin-left: auto; }
+.ag-note { margin: var(--s-2) 0 0; font-size: var(--fs-xs); color: var(--c-text-faint); line-height: 1.5; }
+
+/* ---------- status strip ------------------------------------------------- */
+.ag-strip {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: var(--s-2);
+}
+.ag-stat {
+  background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: var(--r-md); padding: var(--s-3);
+}
+.ag-stat span {
+  display: block; font-size: 10px; color: var(--c-text-faint);
+  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 2px;
+}
+.ag-stat b {
+  font-size: var(--fs-md); font-variant-numeric: tabular-nums;
+  word-break: break-all; line-height: 1.25;
+}
+
+/* ---------- pipeline ----------------------------------------------------- */
+.ag-flow {
+  list-style: none; margin: var(--s-3) 0 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: var(--s-2);
+}
+.ag-node {
+  padding: var(--s-3); border-radius: var(--r-md);
+  border: 1px solid var(--c-border); background: var(--c-surface);
+  opacity: .45; transition: opacity var(--t-base), border-color var(--t-base);
+}
+.ag-node b { display: block; font-size: var(--fs-sm); }
+.ag-node span { font-size: 10px; color: var(--c-text-faint); }
+.ag-node.is-active {
+  opacity: 1; border-color: var(--c-primary);
+  box-shadow: 0 0 0 3px var(--c-primary-soft);
+}
+.ag-node.is-done { opacity: 1; border-color: var(--c-ok-border); background: var(--c-ok-soft); }
+/* A skipped stage stays dim ON PURPOSE: the skip is the evidence that the
+   agent chose a path, so hiding it would hide the point. */
+.ag-node.is-skipped { opacity: .28; border-style: dashed; }
+.ag-node--engine { border-width: 2px; border-color: var(--c-border-strong); }
+.ag-node--engine.is-done { border-color: var(--c-primary); background: var(--c-primary-soft); }
+
+/* ---------- columns ------------------------------------------------------ */
+.ag-cols { display: grid; grid-template-columns: minmax(0,1.1fr) minmax(0,1fr); gap: var(--s-4); align-items: start; }
+.ag-side { display: flex; flex-direction: column; gap: var(--s-4); }
+@media (max-width: 1080px) { .ag-cols { grid-template-columns: 1fr; } }
+
+/* ---------- trace -------------------------------------------------------- */
+.ag-trace {
+  list-style: none; margin: var(--s-2) 0 0; padding: 0;
+  max-height: 560px; overflow-y: auto;
+}
+.ag-e {
+  padding: 7px 0 7px var(--s-4); border-left: 2px solid var(--c-border);
+  position: relative;
+}
+.ag-e::before {
+  content: ""; position: absolute; left: -5px; top: 13px;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--c-border-strong);
+}
+.ag-e--select::before { background: var(--c-primary); }
+.ag-e--done::before   { background: var(--c-ok); }
+.ag-e--fail::before   { background: var(--c-danger); }
+.ag-e--replan::before { background: var(--c-warn); }
+.ag-e--engine { border-left-color: var(--c-primary); }
+.ag-e--engine::before { background: var(--c-primary); }
+.ag-e--engine .ag-line b { color: var(--c-primary); letter-spacing: .04em; }
+.ag-e--obs { opacity: .6; }
+.ag-slotmark {
+  margin: var(--s-3) 0 4px; padding: 3px var(--s-2);
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--c-text-faint); background: var(--c-surface-2);
+  border-radius: var(--r-sm); list-style: none;
+}
+.ag-line { display: flex; justify-content: space-between; gap: var(--s-3); align-items: baseline; }
+.ag-line b { font-size: var(--fs-sm); }
+.ag-line time { font-size: 10px; color: var(--c-text-faint); font-variant-numeric: tabular-nums; }
+.ag-why { margin: 3px 0 0; font-size: var(--fs-xs); color: var(--c-text-faint); line-height: 1.5; }
+.ag-why span {
+  display: inline-block; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; margin-right: 6px; color: var(--c-primary); font-size: 10px;
+}
+.ag-why p { margin: 2px 0 0; }
+.ag-res { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.ag-chip {
+  display: inline-flex; gap: 5px; align-items: baseline;
+  background: var(--c-bg); border: 1px solid var(--c-border);
+  border-radius: var(--r-sm); padding: 2px 7px; font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.ag-chip i { font-style: normal; color: var(--c-text-faint); }
+.ag-chip--route { border-color: var(--c-primary); font-weight: 700; }
+.ag-empty { color: var(--c-text-faint); font-size: var(--fs-sm); list-style: none; }
+
+/* ---------- current action ---------------------------------------------- */
+.ag-now__tool { font-size: var(--fs-lg); font-weight: 650; }
+.ag-now__why { margin-top: 4px; font-size: var(--fs-sm); color: var(--c-text-faint); line-height: 1.55; }
+
+/* ---------- decision ----------------------------------------------------- */
+.ag-route {
+  font-size: 25px; font-weight: 700; letter-spacing: -.01em;
+  padding: var(--s-3); border-radius: var(--r-md); text-align: center;
+  border: 2px solid var(--c-border-strong); margin: var(--s-2) 0;
+}
+.ag-route--referral     { color: var(--c-warn);    border-color: var(--c-warn-border);   background: var(--c-warn-soft); }
+.ag-route--urgent       { color: var(--c-danger);  border-color: var(--c-danger-border); background: var(--c-danger-soft); }
+.ag-route--routine      { color: var(--c-ok);      border-color: var(--c-ok-border);     background: var(--c-ok-soft); }
+.ag-route--human-review { color: var(--c-primary); border-color: var(--c-primary);       background: var(--c-primary-soft); }
+.ag-route--recapture    { color: var(--c-warn);    border-color: var(--c-warn-border);   background: var(--c-warn-soft); }
+.ag-reasons { margin: 0 0 var(--s-3); padding-left: var(--s-5); font-size: var(--fs-sm); }
+.ag-boundary {
+  margin: var(--s-2) 0 0; padding: var(--s-2) var(--s-3);
+  background: var(--c-primary-soft); border-left: 3px solid var(--c-primary);
+  border-radius: var(--r-sm); font-size: var(--fs-xs); line-height: 1.55;
+}
+.ag-kv { display: grid; grid-template-columns: auto 1fr; gap: 3px var(--s-4); font-size: var(--fs-xs); margin: 0; }
+.ag-kv--wide { font-size: var(--fs-sm); gap: 5px var(--s-5); }
+.ag-kv dt { color: var(--c-text-faint); }
+.ag-kv dd { margin: 0; }
+
+/* ---------- tables ------------------------------------------------------- */
+.ag-tablewrap { overflow-x: auto; margin-top: var(--s-2); }
+.ag-table { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); }
+.ag-table th {
+  text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--c-text-faint); white-space: nowrap;
+  border-bottom: 1px solid var(--c-border-strong); padding: 7px 8px;
+}
+.ag-table td { padding: 8px; border-bottom: 1px solid var(--c-border); vertical-align: top; }
+.ag-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ag-table tbody tr:hover { background: var(--c-surface-2); }
+.ag-file { display: block; font-size: 10px; color: var(--c-text-faint); margin-top: 2px; }
+.ag-stage { white-space: nowrap; font-weight: 600; }
+.ag-metric { font-variant-numeric: tabular-nums; }
+.ag-ds { color: var(--c-text-faint); white-space: nowrap; }
+/* The caveat column is the reason this table is worth showing. It is not
+   de-emphasised into invisibility. */
+.ag-caveat { color: var(--c-text); max-width: 340px; line-height: 1.5; }
+.ag-table--models td { font-size: 11px; }
+
+.ag-pill {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; letter-spacing: .04em; white-space: nowrap;
+  border: 1px solid var(--c-border-strong);
+}
+.ag-pill--referral     { color: var(--c-warn);    border-color: var(--c-warn-border);   background: var(--c-warn-soft); }
+.ag-pill--urgent       { color: var(--c-danger);  border-color: var(--c-danger-border); background: var(--c-danger-soft); }
+.ag-pill--routine      { color: var(--c-ok);      border-color: var(--c-ok-border);     background: var(--c-ok-soft); }
+.ag-pill--human-review { color: var(--c-primary); border-color: var(--c-primary);       background: var(--c-primary-soft); }
+.ag-pill--recapture-required,
+.ag-pill--recapture    { color: var(--c-warn);    border-color: var(--c-warn-border);   background: var(--c-warn-soft); }
+.ag-pill--failed       { color: var(--c-danger);  border-color: var(--c-danger-border); background: var(--c-danger-soft); }
+
+/* ---------- print -------------------------------------------------------- */
+@media print {
+  .topbar, .footer, .ag-runbar, #dlCard, .ag-slots, #demoBtn, #modelsToggle { display: none; }
+  .ag-page { max-width: none; padding: 0; }
+  .card { break-inside: avoid; }
+}
+
+/* ---------- topbar fixes ------------------------------------------------- */
+/* `.icon-btn` is used by this page's theme toggle and is not defined in
+   app.css — without these rules it rendered as an unstyled white square. */
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--tap-min); height: var(--tap-min);
+  border: 1px solid var(--c-border-strong); border-radius: var(--r-sm);
+  background: var(--c-surface); color: var(--c-text);
+  cursor: pointer; transition: border-color var(--t-base), color var(--t-base);
+}
+.icon-btn:hover { border-color: var(--c-primary); color: var(--c-primary); }
+.icon-btn:focus-visible { outline: 2px solid var(--c-primary); outline-offset: 2px; }
+.icon-btn svg { width: 18px; height: 18px; }
+
+@media (max-width: 560px) { .brand__sub { display: none; } }
+

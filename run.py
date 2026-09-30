@@ -1,0 +1,451 @@
+#!/usr/bin/env python3
+"""OPHIRA launcher — one command to run the whole system.
+
+    python run.py              start everything and open the browser
+    python run.py --check      check requirements only, start nothing
+    python run.py --verify     run the full test suite, then stop
+    python run.py --no-worker  frontend only (no grading; captures stay pending)
+    python run.py --port 8080  use a different port
+    python run.py --no-browser don't open a browser
+
+WHY A LAUNCHER AND NOT "JUST RUN THE SERVER"
+
+The system is two processes that have to agree about one directory. The
+Python server takes captures and writes job files; MATLAB picks those jobs
+up, runs the models, and writes results back. Start only the server and the
+encounter app looks alive but every capture sits at "analysing" forever --
+which is exactly the failure an operator cannot diagnose.
+
+So this checks both halves can actually run BEFORE starting either, and
+says plainly which one is missing.
+
+IT KILLS ONLY ITS OWN CHILDREN. Shutting down with `taskkill /IM MATLAB.exe`
+also kills any unrelated MATLAB session -- a training run, an open desktop.
+This tracks the PIDs it started and terminates those.
+"""
+from __future__ import annotations
+
+import argparse
+import glob
+import os
+import platform
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+import webbrowser
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+
+# Line-buffer stdout. Redirected to a file or a pipe, Python block-buffers,
+# so "MATLAB worker starting..." was the last thing visible while the system
+# came up fine behind it -- a launcher that looks hung when it is working.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except (AttributeError, ValueError):
+    pass
+
+# Models the CASCADE needs. Others in artifacts/models are controls and
+# rejected hypotheses -- absent ones are not a problem.
+REQUIRED_MODELS = [
+    ("m1_teacher_aptos.mat", "DR grader (stage 2, deployed)"),
+    ("m3_triage.mat", "triage filter (stage 1)"),
+    ("m4_maculopathy.mat", "maculopathy head (stage 2b)"),
+    ("m5_lesion_unet.mat", "lesion branch (stage 3)"),
+    ("m7_calibration.mat", "temperature calibration"),
+]
+
+# m0b_quality_cnn.mat is DELIBERATELY ABSENT from this list.
+#
+# The master copy required it and the deployed system never loads it. The
+# quality gate that runs at stage 0 is classical: assess.m calls
+# extractFeatures.m and applyGate.m, and neither contains a model load.
+# Demanding the file would block startup on something the pipeline does not
+# use -- on a machine that legitimately will not carry it, because it is a
+# training-time control rather than a deployed model.
+
+# Colour only when a human is looking. Piping `python run.py > log` should
+# produce a readable log, not a file full of escape codes.
+if sys.stdout.isatty():
+    if platform.system() == "Windows":
+        os.system("")  # enable ANSI processing on cmd.exe
+    G, Y, R, B, DIM, OFF = ("\033[32m", "\033[33m", "\033[31m",
+                            "\033[36m", "\033[2m", "\033[0m")
+else:
+    G = Y = R = B = DIM = OFF = ""
+
+
+def ok(msg, extra=""):
+    print(f"  {G}OK{OFF}    {msg}" + (f"  {DIM}{extra}{OFF}" if extra else ""))
+
+
+def warn(msg, extra=""):
+    print(f"  {Y}WARN{OFF}  {msg}" + (f"\n        {DIM}{extra}{OFF}" if extra else ""))
+
+
+def bad(msg, fix=""):
+    print(f"  {R}FAIL{OFF}  {msg}" + (f"\n        {DIM}fix: {fix}{OFF}" if fix else ""))
+
+
+def kill_on_exit_job():
+    """A Windows job object that kills its children when this process dies.
+
+    WHY THIS IS NOT OPTIONAL
+
+    MATLAB is a grandchild: run.py starts matlab.exe, which starts its own
+    worker process. If run.py is killed rather than interrupted -- closed
+    terminal, Task Manager, a supervisor -- the Python cleanup never runs
+    and MATLAB keeps draining the job queue invisibly.
+
+    That is not a tidy-up nicety. A stale worker running OLD CODE raced a
+    freshly started one on the same queue during development and kept
+    winning, so fixes appeared not to work at all. Two graders disagreeing
+    about which build they are is a bad failure in a clinical tool.
+
+    A job object with KILL_ON_JOB_CLOSE ties their lifetime to this process
+    at the OS level, so it holds however this process ends. Returns None on
+    non-Windows, where terminate() on the process group is enough.
+    """
+    if platform.system() != "Windows":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+        class IO_COUNTERS(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_ulonglong) for n in (
+                "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+
+        class BASIC_LIMIT(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_longlong),
+                ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.POINTER(ctypes.c_ulong)),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD)]
+
+        class EXT_LIMIT(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", BASIC_LIMIT),
+                ("IoInfo", IO_COUNTERS),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+
+        info = EXT_LIMIT()
+        info.BasicLimitInformation.LimitFlags = 0x2000  # KILL_ON_JOB_CLOSE
+        if not k32.SetInformationJobObject(
+                job, 9, ctypes.byref(info), ctypes.sizeof(info)):
+            return None
+        return (job, k32)
+    except Exception:
+        return None
+
+
+def adopt(job, proc):
+    """Put a child in the job object, so it cannot outlive this process."""
+    if not job:
+        return
+    handle, k32 = job
+    try:
+        import ctypes
+        k32.AssignProcessToJobObject(handle, int(proc._handle))
+    except Exception:
+        pass  # best effort; Ctrl-C cleanup still applies
+
+
+def find_matlab() -> str | None:
+    """MATLAB on PATH, else the newest standard Windows install."""
+    exe = shutil.which("matlab")
+    if exe:
+        return exe
+    pats = [
+        r"C:\Program Files\MATLAB\R*\bin\matlab.exe",
+        r"C:\Program Files (x86)\MATLAB\R*\bin\matlab.exe",
+        "/usr/local/MATLAB/R*/bin/matlab",
+        "/Applications/MATLAB_R*.app/bin/matlab",
+    ]
+    hits: list[str] = []
+    for p in pats:
+        hits += glob.glob(p)
+    return sorted(hits)[-1] if hits else None
+
+
+def port_free(host: str, port: int) -> bool:
+    with socket.socket() as s:
+        s.settimeout(0.6)
+        return s.connect_ex((host, port)) != 0
+
+
+def preflight(port: int, host: str, want_worker: bool, needs_port: bool = True):
+    """Returns (can_serve, matlab_path). Prints a verdict for every check."""
+    print(f"\n{B}Requirements{OFF}")
+    print("  " + "-" * 60)
+    fatal = []
+
+    # --- python ---------------------------------------------------------
+    v = sys.version_info
+    if v >= (3, 9):
+        ok(f"Python {v.major}.{v.minor}.{v.micro}")
+    else:
+        bad(f"Python {v.major}.{v.minor} is too old (need 3.9+)",
+            "install a newer Python and re-run")
+        fatal.append("python")
+
+    # --- project layout -------------------------------------------------
+    needed = ["app/server/ophira_server.py", "app/index.html", "+ophira", "startup_ophira.m"]
+    missing = [p for p in needed if not (ROOT / p).exists()]
+    if missing:
+        bad(f"not a complete OPHIRA checkout — missing {', '.join(missing)}",
+            f"run this from the project root ({ROOT})")
+        fatal.append("layout")
+    else:
+        ok("project layout", str(ROOT))
+
+    # --- writable session store -----------------------------------------
+    store = ROOT / "data" / "sessions"
+    try:
+        (store / "jobs" / "pending").mkdir(parents=True, exist_ok=True)
+        probe = store / ".write_probe"
+        probe.write_text("x", encoding="utf-8")
+        probe.unlink()
+        ok("session store writable", str(store))
+    except OSError as e:
+        bad(f"cannot write to {store}: {e}", "check permissions or disk space")
+        fatal.append("store")
+
+    # --- port ------------------------------------------------------------
+    if not needs_port:
+        warn(f"port {port} not checked", "this run starts no server")
+    elif port_free(host, port):
+        ok(f"port {port} is free")
+    else:
+        bad(f"port {port} is already in use",
+            f"stop the other process, or run: python run.py --port {port + 1}")
+        fatal.append("port")
+
+    # --- MATLAB ----------------------------------------------------------
+    matlab = find_matlab()
+    if not want_worker:
+        warn("MATLAB worker disabled (--no-worker)",
+             "captures will be accepted but never graded")
+    elif matlab:
+        ok("MATLAB found", matlab)
+    else:
+        warn("MATLAB not found — starting the frontend only",
+             "the encounter app will run, but every capture will sit at "
+             "'analysing' forever because nothing grades it")
+
+    # --- trained models ---------------------------------------------------
+    mdir = ROOT / "artifacts" / "models"
+    absent = [(f, d) for f, d in REQUIRED_MODELS if not (mdir / f).exists()]
+    if not absent:
+        ok(f"all {len(REQUIRED_MODELS)} cascade models present", str(mdir))
+    else:
+        for f, d in absent:
+            bad(f"missing model {f} — {d}",
+                "train it with the matching scripts/run_*.m, or restore artifacts/models")
+        fatal.append("models")
+
+    print("  " + "-" * 60)
+    return (not fatal), (matlab if want_worker else None)
+
+
+def sample_image() -> str | None:
+    """A fundus image to try the capture step with.
+
+    The master copy looked this up in data/manifests/aptos_manifest.csv.
+    That manifest is a training artefact and is not part of this
+    deployment, so the hint comes from samples/ instead -- a folder whose
+    whole purpose is to hold one image the operator can smoke-test with.
+    """
+    d = ROOT / "samples"
+    if not d.is_dir():
+        return None
+    for f in sorted(d.iterdir()):
+        if f.suffix.lower() in {".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
+            return str(f)
+    return None
+
+
+def wait_for_http(url: str, timeout: float) -> bool:
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        try:
+            with urllib.request.urlopen(url, timeout=1):
+                return True
+        except (urllib.error.URLError, OSError):
+            time.sleep(0.3)
+    return False
+
+
+def wait_for_line(path: Path, needle: str, timeout: float) -> bool:
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        try:
+            if needle in path.read_text(encoding="utf-8", errors="replace"):
+                return True
+        except OSError:
+            pass
+        time.sleep(0.4)
+    return False
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        prog="run.py", description="Start the OPHIRA screening system.")
+    ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--no-worker", action="store_true",
+                    help="frontend only; captures are stored but never graded")
+    ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--check", action="store_true",
+                    help="check requirements and exit")
+    ap.add_argument("--verify", action="store_true",
+                    help="run the full test suite and exit")
+    a = ap.parse_args()
+
+    print(f"\n{B}OPHIRA{OFF}  diabetic retinopathy screening")
+    print(f"{DIM}  {ROOT}{OFF}")
+
+    # --verify starts no server, so a port already in use is irrelevant
+    # to it. Blocking verification because the app happens to be
+    # running was a launcher bug, not a real requirement.
+    can_serve, matlab = preflight(a.port, a.host, not a.no_worker,
+                                  needs_port=not a.verify)
+
+    if a.check:
+        print(f"\n{'ready to start' if can_serve else 'NOT ready — see FAIL lines above'}\n")
+        return 0 if can_serve else 1
+
+    if not can_serve:
+        print(f"\n{R}Cannot start.{OFF} Fix the FAIL lines above, then re-run.\n")
+        return 1
+
+    if a.verify:
+        if not matlab:
+            print(f"\n{R}--verify needs MATLAB.{OFF}\n")
+            return 1
+        print(f"\n{B}Full verification{OFF}  (this takes a few minutes)\n")
+        # run_99_verify_all belongs to the MASTER copy: it samples 50 APTOS
+        # images through ophira.data.readManifest, so it needs the datasets
+        # this deployment deliberately excludes. Running it here would fail
+        # for the right reason and look like a broken deployment.
+        #
+        # run_deploy_verify covers what CAN be verified without datasets:
+        # the unit and scenario suites, plus a real inference on a supplied
+        # fundus image.
+        return subprocess.call([matlab, "-batch", "startup_ophira; run_deploy_verify"],
+                               cwd=str(ROOT))
+
+    job = kill_on_exit_job()
+
+    logs = ROOT / "artifacts" / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    srv_log, wrk_log = logs / "server.log", logs / "worker.log"
+    children: list[tuple[str, subprocess.Popen]] = []
+
+    print(f"\n{B}Starting{OFF}")
+    print("  " + "-" * 60)
+
+    # --- server ----------------------------------------------------------
+    sf = open(srv_log, "w", encoding="utf-8")
+    p = subprocess.Popen(
+        [sys.executable, str(ROOT / "app" / "server" / "ophira_server.py"),
+         "--port", str(a.port), "--host", a.host],
+        cwd=str(ROOT), stdout=sf, stderr=subprocess.STDOUT)
+    adopt(job, p)
+    children.append(("server", p))
+
+    url = f"http://{a.host}:{a.port}"
+    if wait_for_http(f"{url}/api/health", 20):
+        ok("encounter server", url)
+    else:
+        bad("server did not come up", f"see {srv_log}")
+        p.terminate()
+        return 1
+
+    # --- worker ----------------------------------------------------------
+    if matlab:
+        if wrk_log.exists():
+            wrk_log.unlink()
+        wf = open(wrk_log, "w", encoding="utf-8")
+        w = subprocess.Popen(
+            [matlab, "-batch", "startup_ophira; ophira.worker.run(PollSec=0.5)"],
+            cwd=str(ROOT), stdout=wf, stderr=subprocess.STDOUT)
+        adopt(job, w)
+        children.append(("worker", w))
+        print(f"  {DIM}...   MATLAB worker starting (loads toolboxes, ~30s){OFF}", flush=True)
+        if wait_for_line(wrk_log, "Ctrl-C to stop", 180):
+            ok("MATLAB worker", "grading live")
+        else:
+            warn("worker did not report ready in 180s",
+                 f"it may still be loading — watch {wrk_log}")
+    else:
+        warn("no worker", "captures will not be graded")
+
+    print("  " + "-" * 60)
+    print(f"\n{G}Open:{OFF}  {url}")
+    print(f"{DIM}  dashboard   {url}/dashboard.html{OFF}")
+    print(f"{DIM}  logs        {srv_log.parent}{OFF}")
+    if matlab:
+        # Looked up in the manifest rather than hardcoded: the dataset lives
+        # wherever the import put it, and a wrong path in a "try this" hint
+        # is worse than no hint.
+        img = sample_image()
+        if img:
+            print(f"{DIM}  test image  {img}{OFF}")
+            print(f"{DIM}              (passes the quality gate -> REFERRAL){OFF}")
+    print(f"\n{DIM}Ctrl-C to stop both processes.{OFF}\n")
+
+    if not a.no_browser:
+        webbrowser.open(url)
+
+    # --- run until interrupted -------------------------------------------
+    try:
+        while True:
+            for name, proc in children:
+                if proc.poll() is not None:
+                    print(f"\n{R}{name} exited (code {proc.returncode}){OFF}")
+                    raise KeyboardInterrupt
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print(f"\n{B}Stopping{OFF}")
+        # Only the processes THIS script started. Killing by image name would
+        # take down an unrelated MATLAB session -- a training run, an open
+        # desktop -- which is a mistake that is easy to make and hard to undo.
+        for name, proc in reversed(children):
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            print(f"  stopped {name}")
+        print()
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

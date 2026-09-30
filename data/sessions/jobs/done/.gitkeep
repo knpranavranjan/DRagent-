@@ -1,0 +1,2 @@
+# Keeps this directory in git. The app needs it to exist; nothing inside
+# it is tracked -- it holds runtime clinical data. See ../../.gitignore.

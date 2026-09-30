@@ -1,0 +1,28 @@
+# ---------------------------------------------------------------------------
+# Line endings and binary safety
+# ---------------------------------------------------------------------------
+# Git auto-detects these as binary today, and gets it right. It is pinned
+# anyway: if a .mat ever went through CRLF conversion the model would be
+# silently corrupted, and a corrupted grader is not something a test would
+# obviously catch. Not worth leaving to detection.
+*.mat  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.tif  binary
+*.tiff binary
+*.pdf  binary
+*.zip  binary
+
+# Text: normalised to LF in the repository, checked out native.
+*.m    text
+*.py   text
+*.js   text
+*.mjs  text
+*.json text
+*.html text
+*.css  text
+*.md   text
+
+# Windows batch files need CRLF to run correctly.
+*.bat  text eol=crlf
