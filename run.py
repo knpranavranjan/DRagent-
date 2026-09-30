@@ -192,6 +192,45 @@ def find_matlab() -> str | None:
     return sorted(hits)[-1] if hits else None
 
 
+KEY_FILE = ROOT / ".ophira_key"
+
+
+def persistent_key() -> str:
+    """The access key, reused across runs.
+
+    A fresh random key every start is the safer default in the abstract,
+    and in practice it meant the operator had to fetch a new link out of
+    the terminal before every single session -- including from a phone
+    that could not see the terminal. People work around that by writing
+    the key somewhere worse.
+
+    So it is generated once and kept in .ophira_key, which is gitignored.
+    Delete that file to rotate it; the next run mints a new one and every
+    old link stops working immediately.
+
+    NOTE: this does not make the URL stable. A Cloudflare quick tunnel is
+    assigned a random hostname on every run, whatever the key is. Only a
+    named tunnel gives a fixed address -- DEPLOY_REMOTE.md has the steps.
+    """
+    try:
+        existing = KEY_FILE.read_text(encoding="utf-8").strip()
+        if len(existing) >= 16:
+            return existing
+    except OSError:
+        pass
+    fresh = secrets.token_urlsafe(24)
+    try:
+        KEY_FILE.write_text(fresh, encoding="utf-8")
+        if platform.system() != "Windows":
+            os.chmod(KEY_FILE, 0o600)
+    except OSError as e:
+        # Not fatal: the key still works for this run, it just will not
+        # survive a restart. Say so rather than failing to start.
+        warn(f"could not save the access key to {KEY_FILE.name}: {e}",
+             "the link will change on the next run")
+    return fresh
+
+
 def find_cloudflared() -> str | None:
     """cloudflared on PATH, in tools/, or in the usual winget install spot."""
     exe = shutil.which("cloudflared")
@@ -414,14 +453,14 @@ def main() -> int:
                     help="publish a public HTTPS URL via Cloudflare. Always "
                          "key-gated; there is no unauthenticated tunnel.")
     ap.add_argument("--key", default=os.environ.get("OPHIRA_KEY") or None,
-                    help="access key to use instead of a fresh random one, so "
-                         "the link stays valid across restarts")
+                    help="access key to use instead of the saved one in "
+                         ".ophira_key")
     a = ap.parse_args()
 
     # A key is generated for --tunnel and cannot be turned off. Exposing a
     # screening tool that accepts fundus images to the open internet, with
     # no gate, is not a mode this launcher offers.
-    key = (a.key or secrets.token_urlsafe(24)) if a.tunnel else a.key
+    key = (a.key or persistent_key()) if a.tunnel else a.key
 
     print(f"\n{B}OPHIRA{OFF}  diabetic retinopathy screening")
     print(f"{DIM}  {ROOT}{OFF}")
@@ -532,8 +571,10 @@ def main() -> int:
         print(f"{DIM}  agent UI    {public}/agent.html?k={key}{OFF}")
         print(f"{DIM}  Anyone with this link has full access. It is the "
               f"credential.{OFF}")
-        print(f"{DIM}  The address changes every restart unless you pass "
-              f"--key.{OFF}")
+        print(f"{DIM}  The key is reused from .ophira_key — delete that "
+              f"file to rotate it.{OFF}")
+        print(f"{DIM}  The HOSTNAME still changes each run; see "
+              f"DEPLOY_REMOTE.md for a fixed address.{OFF}")
         print(f"{DIM}  Closing this window closes the tunnel.{OFF}")
 
     print(f"\n{G}Open:{OFF}  {url}" + (f"/?k={key}" if key else ""))

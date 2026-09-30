@@ -46,3 +46,6 @@ slprj/
 # Downloaded tunnel client (55 MB). Not source; run.py finds it here or on
 # PATH, and DEPLOY_REMOTE.md says how to fetch it.
 tools/
+
+# The saved access key. A credential, not configuration.
+.ophira_key

@@ -43,7 +43,16 @@ A static host can serve the UI. It cannot screen anything.
 
 ---
 
-## One command
+## Double-click
+
+| file | what it does |
+|---|---|
+| **START OPHIRA.bat** | runs on this PC only. No key, nothing published. |
+| **SHARE OPHIRA.bat** | runs it and prints a public HTTPS link. |
+
+Keep the window open — closing it stops the worker and closes the link.
+
+## Or one command
 
 ```
 python run.py --tunnel
@@ -88,11 +97,15 @@ So:
 
 - Send the link over something private. Not a public repo, not a slide, not
   a screenshot in a demo video.
-- A fresh key is generated on every `--tunnel` run. Restarting invalidates
-  the old link, which is the safe default.
-- `--key` keeps a link alive across restarts. Convenient, and it means a
-  leaked link stays valid until you change it. Pick one deliberately.
+- The key is generated once and kept in `.ophira_key`, which is gitignored.
+  It is reused on every run, so the `?k=` part of the link stays the same.
+- **Delete `.ophira_key` to rotate it.** The next run mints a new one and
+  every previously shared link stops working immediately.
+- `--key <k>` overrides the saved one for a single run.
 - `Ctrl-C` ends all access immediately.
+
+**The key staying the same does not make the URL stay the same.** A quick
+tunnel gets a random hostname every run regardless. See below.
 
 How it is enforced, in [app/server/ophira_server.py](app/server/ophira_server.py):
 
@@ -129,9 +142,27 @@ not diagnose, and every route comes from the deterministic decision engine.
 
 ## A stable address
 
-`trycloudflare.com` quick tunnels get a random hostname each run and
-Cloudflare does not guarantee them. For a fixed address you need a free
-Cloudflare account and a domain:
+`trycloudflare.com` quick tunnels get a random hostname on every run and
+Cloudflare does not guarantee them. Two ways to get an address that does
+not move.
+
+### ngrok — free, no domain needed
+
+The free tier includes one permanent domain, which is the cheapest way to
+stop re-sending links. Sign up, then:
+
+```
+winget install ngrok.ngrok
+ngrok config add-authtoken <token from your dashboard>
+ngrok http --url=<your-static-domain>.ngrok-free.app 8000
+```
+
+Start `python run.py` (no `--tunnel`) alongside it. The address is then the
+same every time and only the key matters.
+
+### Cloudflare named tunnel — needs a domain you own
+
+If you already have a domain on Cloudflare:
 
 ```
 tools/cloudflared.exe tunnel login
