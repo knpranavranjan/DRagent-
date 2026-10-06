@@ -146,19 +146,27 @@ not diagnose, and every route comes from the deterministic decision engine.
 Cloudflare does not guarantee them. Two ways to get an address that does
 not move.
 
-### ngrok — free, no domain needed
+### ngrok — free, no domain of your own needed
 
-The free tier includes one permanent domain, which is the cheapest way to
-stop re-sending links. Sign up, then:
+**Double-click `SETUP PERMANENT LINK.bat` once.** It walks through the free
+signup, saves the authtoken, and records your reserved domain in
+`.ngrok_domain`.
 
-```
-winget install ngrok.ngrok
-ngrok config add-authtoken <token from your dashboard>
-ngrok http --url=<your-static-domain>.ngrok-free.app 8000
-```
+After that `SHARE OPHIRA.bat` publishes on that same address every run, and
+the launcher says `OK permanent address` instead of warning that the URL
+will move. Nothing else changes: same key, same link file.
 
-Start `python run.py` (no `--tunnel`) alongside it. The address is then the
-same every time and only the key matters.
+It is automatic rather than a flag. `run.py --tunnel` uses ngrok when a
+domain is recorded AND an authtoken is saved, and falls back to a
+Cloudflare quick tunnel otherwise — so a half-finished setup degrades to
+the old behaviour with a warning naming what is missing, rather than
+failing to start.
+
+To undo it, delete `.ngrok_domain`.
+
+**Permanent address, not permanent uptime.** The URL is reserved to your
+account forever; it answers only while the launcher window is open and the
+PC is awake.
 
 ### Cloudflare named tunnel — needs a domain you own
 

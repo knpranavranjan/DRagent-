@@ -234,7 +234,8 @@ def persistent_key() -> str:
 LINK_FILE = ROOT / "SHARE LINK.txt"
 
 
-def write_link_file(public: str, key: str, port: int) -> Path | None:
+def write_link_file(public: str, key: str, port: int,
+                    permanent: bool = False) -> Path | None:
     """Put the live link somewhere that is not terminal scrollback.
 
     The link existed only in the launcher's output, which meant finding it
@@ -261,9 +262,12 @@ def write_link_file(public: str, key: str, port: int) -> Path | None:
         "Copy the WHOLE line including the ?k= part -- that is the key,\n"
         "and without it the page answers 'Access key required'.\n\n"
         "Anyone holding this link has full access, so send it privately.\n\n"
-        "This link dies when the launcher window closes, and the hostname\n"
-        "is different every run. This file is deleted on shutdown so that\n"
-        "a dead link is never left lying around to be copied.\n"
+        + ("This address is RESERVED: it is the same every run, so you can\n"
+           "save it. It only answers while this launcher window is open.\n"
+           if permanent else
+           "This link dies when the launcher window closes, and the hostname\n"
+           "is different every run. This file is deleted on shutdown so that\n"
+           "a dead link is never left lying around to be copied.\n")
     )
     try:
         LINK_FILE.write_text(body, encoding="utf-8")
@@ -285,6 +289,79 @@ def find_cloudflared() -> str | None:
         r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\Cloudflare.cloudflared*"
         r"\cloudflared.exe"))
     return sorted(hits)[-1] if hits else None
+
+
+DOMAIN_FILE = ROOT / ".ngrok_domain"
+
+
+def find_ngrok() -> str | None:
+    """ngrok on PATH or in tools/."""
+    exe = shutil.which("ngrok")
+    if exe:
+        return exe
+    local = ROOT / "tools" / ("ngrok.exe" if platform.system() == "Windows"
+                              else "ngrok")
+    return str(local) if local.is_file() else None
+
+
+def ngrok_domain() -> str | None:
+    """The reserved domain to publish on, if one has been configured.
+
+    Lives in .ngrok_domain (gitignored) rather than in a flag, so the
+    operator sets it once and every later run is identical. Returns None
+    when unset, which is what makes the Cloudflare fallback automatic.
+    """
+    try:
+        d = DOMAIN_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    # Accept a pasted URL as well as a bare hostname: the dashboard shows
+    # it as https://..., and retyping it without the scheme is the kind of
+    # instruction people reasonably ignore.
+    d = d.removeprefix("https://").removeprefix("http://").strip("/ ")
+    return d or None
+
+
+def ngrok_ready(exe: str) -> bool:
+    """Is an authtoken saved? Without one ngrok starts and immediately exits."""
+    try:
+        r = subprocess.run([exe, "config", "check"], capture_output=True,
+                           text=True, timeout=20)
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+NGROK_URL = re.compile(r"https://[A-Za-z0-9.-]+\.ngrok(?:-free)?\.(?:app|dev|io)")
+
+
+def start_ngrok(port: int, domain: str, log: Path, job) -> tuple[subprocess.Popen, str] | None:
+    """Open an ngrok tunnel on a RESERVED domain, so the URL never changes."""
+    exe = find_ngrok()
+    if not exe:
+        return None
+    lf = open(log, "w", encoding="utf-8")
+    proc = subprocess.Popen(
+        [exe, "http", f"--url={domain}", str(port), "--log", "stdout"],
+        stdout=lf, stderr=subprocess.STDOUT)
+    adopt(job, proc)
+
+    t0 = time.time()
+    while time.time() - t0 < 45:
+        if proc.poll() is not None:
+            return None
+        try:
+            txt = log.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            txt = ""
+        if "started tunnel" in txt or NGROK_URL.search(txt):
+            return proc, f"https://{domain}"
+        if "ERR_NGROK" in txt or "authentication failed" in txt.lower():
+            proc.terminate()
+            return None
+        time.sleep(0.4)
+    proc.terminate()
+    return None
 
 
 TRYCF = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
@@ -410,14 +487,27 @@ def preflight(port: int, host: str, want_worker: bool, needs_port: bool = True,
 
     # --- tunnel ----------------------------------------------------------
     if want_tunnel:
-        cf = find_cloudflared()
-        if cf:
-            ok("cloudflared found", cf)
+        dom, ng = ngrok_domain(), find_ngrok()
+        if dom and ng and ngrok_ready(ng):
+            ok("permanent address", f"https://{dom}")
         else:
-            bad("cloudflared not installed — cannot open a tunnel",
-                "winget install --id Cloudflare.cloudflared    "
-                "(or drop cloudflared.exe in tools/)")
-            fatal.append("cloudflared")
+            if dom and ng and not ngrok_ready(ng):
+                warn("ngrok domain set but no authtoken saved",
+                     f"run: {ng} config add-authtoken <token>")
+            elif dom and not ng:
+                warn("ngrok domain set but ngrok is not installed",
+                     "put ngrok.exe in tools/, or clear .ngrok_domain")
+            cf = find_cloudflared()
+            if cf:
+                ok("cloudflared found", cf)
+                if not dom:
+                    warn("no permanent address configured",
+                         "the URL will differ every run — see DEPLOY_REMOTE.md")
+            else:
+                bad("no tunnel client installed",
+                    "winget install --id Cloudflare.cloudflared    "
+                    "(or drop cloudflared.exe in tools/)")
+                fatal.append("tunnel")
 
     print("  " + "-" * 60)
     return (not fatal), (matlab if want_worker else None)
@@ -601,31 +691,47 @@ def main() -> int:
 
     # --- tunnel ----------------------------------------------------------
     public = None
+    permanent = False
     if a.tunnel:
-        cf_log = logs / "tunnel.log"
-        print(f"  {DIM}...   opening Cloudflare tunnel{OFF}", flush=True)
-        got = start_tunnel(a.port, cf_log, job)
+        tun_log = logs / "tunnel.log"
+        dom, ng = ngrok_domain(), find_ngrok()
+        got = None
+        if dom and ng and ngrok_ready(ng):
+            print(f"  {DIM}...   opening ngrok tunnel on {dom}{OFF}", flush=True)
+            got = start_ngrok(a.port, dom, tun_log, job)
+            if got:
+                permanent = True
+            else:
+                warn("ngrok did not open — falling back to a temporary address",
+                     f"see {tun_log}")
+        if not got:
+            print(f"  {DIM}...   opening Cloudflare tunnel{OFF}", flush=True)
+            got = start_tunnel(a.port, tun_log, job)
         if got:
             tproc, public = got
             children.append(("tunnel", tproc))
-            ok("public tunnel", public)
+            ok("permanent address" if permanent else "public tunnel", public)
         else:
             warn("tunnel did not open — the system is running locally only",
-                 f"see {cf_log}")
+                 f"see {tun_log}")
 
     print("  " + "-" * 60)
 
     if public:
         link = f"{public}/?k={key}"
-        wrote = write_link_file(public, key, a.port)
+        wrote = write_link_file(public, key, a.port, permanent)
         print(f"\n{G}Public link:{OFF}  {link}")
         print(f"{DIM}  agent UI    {public}/agent.html?k={key}{OFF}")
         print(f"{DIM}  Anyone with this link has full access. It is the "
               f"credential.{OFF}")
         print(f"{DIM}  The key is reused from .ophira_key — delete that "
               f"file to rotate it.{OFF}")
-        print(f"{DIM}  The HOSTNAME still changes each run; see "
-              f"DEPLOY_REMOTE.md for a fixed address.{OFF}")
+        if permanent:
+            print(f"{DIM}  This address is reserved — it is the same every "
+                  f"run.{OFF}")
+        else:
+            print(f"{DIM}  The HOSTNAME changes each run; see "
+                  f"DEPLOY_REMOTE.md for a permanent address.{OFF}")
         if wrote:
             print(f"\n{G}Also saved to:{OFF}  {wrote}")
             print(f"{DIM}  Open that file any time instead of scrolling "

@@ -52,3 +52,6 @@ tools/
 
 # Written at runtime, holds a live access link. Deleted on shutdown.
 SHARE LINK.txt
+
+# Your reserved tunnel domain. Specific to your account.
+.ngrok_domain
